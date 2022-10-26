@@ -1,11 +1,10 @@
 import numpy as np
 import pandas as pd
-import math
 
 class mia(object):
     
     def __init__(self, shadow_train_performance, shadow_train_performance_y, shadow_test_performance, shadow_test_performance_y, query_output, query_output_y, num_classes=10,
-                  x_target=None, y_target=None,x_shadow=None, y_shadow=None, target_train_performance=None, target_test_performance=None,):
+                  x_target=None, y_target=None,x_shadow=None, y_shadow=None):
         '''
         each input contains both model predictions (shape: num_data*num_classes) and ground-truth labels. 
         '''
@@ -20,42 +19,36 @@ class mia(object):
         self.s_tr_outputs, self.s_tr_labels = shadow_train_performance, shadow_train_performance_y      
         self.s_te_outputs, self.s_te_labels = shadow_test_performance, shadow_test_performance_y
         self.q_outputs, self.q_labels =  query_output, query_output_y
-        # self.t_tr_outputs, self.t_tr_labels = target_train_performance
-        # self.t_te_outputs, self.t_te_labels = target_test_performance
         
-        # label matching (label-only)
+        # correction score
         self.s_tr_corr = (np.argmax(self.s_tr_outputs, axis=1)==self.s_tr_labels).astype(int)
         self.s_te_corr = (np.argmax(self.s_te_outputs, axis=1)==self.s_te_labels).astype(int)
         self.q_corr = (np.argmax(self.q_outputs, axis=1)==self.q_labels).astype(int)
-        # self.t_tr_corr = (np.argmax(self.t_tr_outputs, axis=1)==self.t_tr_labels).astype(int)
-        # self.t_te_corr = (np.argmax(self.t_te_outputs, axis=1)==self.t_te_labels).astype(int)
         
-        
+        # confidence score
         self.s_tr_conf = np.array([self.s_tr_outputs[i, self.s_tr_labels[i]] for i in range(len(self.s_tr_labels))])
         self.s_te_conf = np.array([self.s_te_outputs[i, self.s_te_labels[i]] for i in range(len(self.s_te_labels))])
         self.q_conf = np.array([self.q_outputs[i, self.q_labels[i]] for i in range(len(self.q_labels))])
-        # self.t_tr_conf = np.array([self.t_tr_outputs[i, self.t_tr_labels[i]] for i in range(len(self.t_tr_labels))])
-        # self.t_te_conf = np.array([self.t_te_outputs[i, self.t_te_labels[i]] for i in range(len(self.t_te_labels))])
         
         # entropy
         self.s_tr_entr = self._entr_comp(self.s_tr_outputs)
         self.s_te_entr = self._entr_comp(self.s_te_outputs)
         self.q_entr = self._entr_comp(self.q_outputs)
-        # print(self.q_entr)
-        # print(self.q_outputs)
-        # self.t_tr_entr = self._entr_comp(self.t_tr_outputs)
-        # self.t_te_entr = self._entr_comp(self.t_te_outputs)
         
         # modified entropy
         self.s_tr_m_entr = self._m_entr_comp(self.s_tr_outputs, self.s_tr_labels)
         self.s_te_m_entr = self._m_entr_comp(self.s_te_outputs, self.s_te_labels)
         self.q_m_entr = self._m_entr_comp(self.q_outputs, self.q_labels)
-        # self.t_tr_m_entr = self._m_entr_comp(self.t_tr_outputs, self.t_tr_labels)
-        # self.t_te_m_entr = self._m_entr_comp(self.t_te_outputs, self.t_te_labels)
 
-        # print(self.s_tr_conf.shape, self.s_tr_entr.shape)
+        # scaled logits
+        self.s_tr_logits = self._scaled_logits(self.s_tr_conf)
+        self.s_te_logits = self._scaled_logits(self.s_te_conf)
+        self.q_logits = self._scaled_logits(self.q_conf)
+
         
-    
+    def _scaled_logits(self, confs):
+        return np.log(np.divide(confs, 1 - confs))
+
     def _log_value(self, probs, small_value=1e-30):
         return -np.log(np.maximum(probs, small_value))
     
@@ -92,17 +85,9 @@ class mia(object):
                 thre, max_acc = value, acc
         return thre
     
-    def _mem_inf_via_corr(self):
-        # perform membership inference attack based on whether the input is correctly classified or not
-        t_tr_acc = np.sum(self.t_tr_corr)/(len(self.t_tr_corr)+0.0)
-        t_te_acc = np.sum(self.t_te_corr)/(len(self.t_te_corr)+0.0)
-        mem_inf_acc = 0.5*(t_tr_acc + 1 - t_te_acc)
-        print('For membership inference attack via correctness, the attack acc is {acc1:.3f}, with train acc {acc2:.3f} and test acc {acc3:.3f}'.format(acc1=mem_inf_acc, acc2=t_tr_acc, acc3=t_te_acc) )
-        return mem_inf_acc, t_tr_acc, t_te_acc
-    
     def _mem_inf_thre(self, v_name, s_tr_values, s_te_values, q_values, t_tr_values=None, t_te_values=None, return_acc=False, thre_given = None):
         # perform membership inference attack by thresholding feature values: the feature can be prediction confidence,
-        # (negative) prediction entropy, and (negative) modified entropy
+        # (negative) prediction entropy, (negative) modified entropy, and scaled confidence logits
         t_tr_mem, t_te_non_mem = 0, 0
         if thre_given is not None:
             thres = thre_given
@@ -177,6 +162,15 @@ class mia(object):
                 mat_cal_bin['modified entropy'] = bin_ment_cal
                 mat_query['modified entropy'] = -self.q_m_entr
                 mat_query_bin['modified entropy'] = bin_ment_query
+        
+        if (all_methods) or ('scaled logits') in benchmark_methods:
+            thre_logs, bin_logs_cal, bin_logs_query = self._mem_inf_thre('scaled logits', self.s_tr_logits, self.s_te_logits, self.q_logits, return_acc=False)
+            res['thresholds']['thre_logs'] = thre_logs
+            if return_matrix:
+                mat_cal['scaled logits'] = np.concatenate((self.s_tr_logits, self.s_te_logits))
+                mat_cal_bin['scaled logits'] = bin_logs_cal
+                mat_query['scaled logits'] = self.q_logits
+                mat_query_bin['scaled logits'] = bin_logs_query
 
         if return_matrix:
             mat_cal['membership'] = membership_label
@@ -187,36 +181,4 @@ class mia(object):
             res['query_values'] = mat_query
             res['query_values_bin'] = mat_query_bin
 
-        return res
-    
-    def _mem_inf_benchmarks(self, all_methods=True, benchmark_methods=[], args=None):
-        best_acc = 0
-        res = []
-        if (all_methods) or ('correctness' in benchmark_methods):
-            acc_corr, train_acc, test_acc = self._mem_inf_via_corr()
-            res.extend([train_acc, test_acc, acc_corr])
-            if acc_corr > best_acc:
-                best_acc = acc_corr
-        if (all_methods) or ('confidence' in benchmark_methods):
-            acc_conf = self._mem_inf_thre('confidence', self.s_tr_conf, self.s_te_conf, self.t_tr_conf, self.t_te_conf)
-            res.append(acc_conf)
-            if acc_conf > best_acc:
-                best_acc = acc_conf
-        if (all_methods) or ('entropy' in benchmark_methods):
-            acc_ent = self._mem_inf_thre('entropy', -self.s_tr_entr, -self.s_te_entr, -self.t_tr_entr, -self.t_te_entr)
-            res.append(acc_ent)
-            if acc_ent > best_acc:
-                best_acc = acc_ent
-        if (all_methods) or ('modified entropy' in benchmark_methods):
-            acc_ment = self._mem_inf_thre('modified entropy', -self.s_tr_m_entr, -self.s_te_m_entr, -self.t_tr_m_entr, -self.t_te_m_entr)
-            res.append(acc_ment)
-            if acc_ment > best_acc:
-                best_acc = acc_ment
-        ## TODO: add API for NN attacks
-        # if (all_methods) or ('NN' in benchmark_methods):
-        #     print('To be implemented')
-        #     acc_NN = self._mem_inf_NN(args)
-        
-        print(f'Best attack acc: {best_acc}')
-        res.append(best_acc)
         return res
