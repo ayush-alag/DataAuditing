@@ -38,6 +38,7 @@ parser.add_argument('--qsize', type=int, default=2000)
 
 parser.add_argument('--mixup', type=int, default=0)
 parser.add_argument('--use_own', dest='use_own', action='store_true')
+parser.add_argument('--expt', type=str, default='')
 
 args = parser.parse_args()
 
@@ -164,11 +165,11 @@ if args.audit == 'EMA':
     res = MIA._run_mia()
     print('Finish cal set')
 
-    if not os.path.exists(f'./saves_new/EMA_{args.dataset}/'):
-        os.makedirs(f'./saves_new/EMA_{args.dataset}/')
-        os.makedirs(f'./saves_new/EMA_{args.dataset}/cal_set')
-        os.makedirs(f'./saves_new/EMA_{args.dataset}/query_set')
-        os.makedirs(f'./saves_new/EMA_{args.dataset}/thres')
+    if not os.path.exists(f'./saves_new/{args.expt}/EMA_{args.dataset}/'):
+        os.makedirs(f'./saves_new/{args.expt}/EMA_{args.dataset}/')
+        os.makedirs(f'./saves_new/{args.expt}/EMA_{args.dataset}/cal_set')
+        os.makedirs(f'./saves_new/{args.expt}/EMA_{args.dataset}/query_set')
+        os.makedirs(f'./saves_new/{args.expt}/EMA_{args.dataset}/thres')
 
     logname = f'caldata={args.cal_data}_epoch={args.epoch}_k={args.k}_calsize={args.cal_size}'
     if args.mixup:
@@ -177,14 +178,14 @@ if args.audit == 'EMA':
         logname += '_useown'
 
     res['cal_values_bin'].to_csv(
-        f'./saves_new/EMA_{args.dataset}/cal_set/binarized_{logname}.csv', index=False)
+        f'./saves_new/{args.expt}/EMA_{args.dataset}/cal_set/binarized_{logname}.csv', index=False)
     res['cal_values'].to_csv(
-        f'./saves_new/EMA_{args.dataset}/cal_set/continuous_{logname}.csv', index=False)
+        f'./saves_new/{args.expt}/EMA_{args.dataset}/cal_set/continuous_{logname}.csv', index=False)
 
     res['query_values_bin'].to_csv(
-        f'./saves_new/EMA_{args.dataset}/query_set/binarized_{logname}_fold{args.fold}.csv', index=False)
+        f'./saves_new/{args.expt}/EMA_{args.dataset}/query_set/binarized_{logname}_fold{args.fold}.csv', index=False)
     res['query_values'].to_csv(
-        f'./saves_new/EMA_{args.dataset}/query_set/continuous_{logname}_fold{args.fold}.csv', index=False)
+        f'./saves_new/{args.expt}/EMA_{args.dataset}/query_set/continuous_{logname}_fold{args.fold}.csv', index=False)
 
     pickle.dump(res['thresholds'], open(
-        f'./saves_new/EMA_{args.dataset}/thres/{logname}.pkl', 'wb'))
+        f'./saves_new/{args.expt}/EMA_{args.dataset}/thres/{logname}.pkl', 'wb'))
