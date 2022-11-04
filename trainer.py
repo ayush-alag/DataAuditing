@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torch.optim as optim
 from torchvision import models
+import wandb
 
 from arch import MLP
 
@@ -32,7 +33,14 @@ def mixup_criterion(criterion, pred, y_a, y_b, lam):
 
 
 class Trainer():
-    def __init__(self, dataset, name, dim, criterion, max_epoch, mode='base', ckpt_name='', mixup=False):
+    def __init__(self, dataset, name, dim, criterion, max_epoch, mode='base', ckpt_name='', mixup=False, dropout_probability=0, expt=""):
+        wandb.init(project=expt)
+        wandb.config = {
+            "dimensions": dim,
+            "epochs": max_epoch,
+            "dataset": dataset,
+            "dropout": dropout_probability,
+        }
         self.name = name
         assert self.name in ['MNIST', 'COVIDx']
         self.dataset = dataset
@@ -42,7 +50,7 @@ class Trainer():
         self.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu")
         if self.name == 'MNIST':
-            self.model = MLP.MLP(28, dim, 10).to(self.device)
+            self.model = MLP.MLP(28, dim, 10, dropout_probability).to(self.device)
         else:
             self.model = models.resnet18(pretrained=False, num_classes=2).to(self.device)
         self.criterion = criterion
@@ -106,6 +114,9 @@ class Trainer():
             else:
                 output = self.model(images)
                 loss = self.criterion(output, labels)
+            
+            wandb.log({"loss": loss})
+            wandb.watch(self.model)
 
             loss.backward()
             train_loss += loss.item()
