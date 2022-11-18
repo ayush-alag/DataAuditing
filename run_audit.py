@@ -69,8 +69,8 @@ if args.audit == 'EMA':
 
 # initialize
 if args.dataset == 'MNIST':
-    model_train = MLP.MLP(28, args.dim, 10).to(device)
-    model_cal = MLP.MLP(28, args.dim, 10).to(device)
+    model_train = MLP.MLP(28, args.dim, 10, args.dropout_probability).to(device)
+    model_cal = MLP.MLP(28, args.dim, 10, args.dropout_probability).to(device)
 elif args.dataset == 'COVIDx':
     model_train = models.resnet18(pretrained=False, num_classes=2).to(device)
     model_cal = models.resnet18(pretrained=False, num_classes=2).to(device)

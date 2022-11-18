@@ -15,14 +15,14 @@ module load anaconda3/2022.5
 conda activate audit
 wandb offline
 
-epoch=50
+epoch=1
 I=$1
 
 # Train the base model
 python train_model.py --mode base --dataset MNIST --batch_size 64 --epoch $epoch --train_size 10000
 
 ## Train the calibration model and run audit
-experiment = "dropout$I"
+experiment="dummydropout$I"
 echo experiment
 for k in 0 10 20 30 40 50
 do

@@ -68,6 +68,7 @@ class Trainer():
 
         self.mixup = mixup
         self.alpha = 1
+        self.expt = expt
 
     def test(self):
         self.model.eval()
@@ -148,14 +149,14 @@ class Trainer():
 
     def save_ckpt(self, epoch):
         if epoch % 10 == 0 or epoch == self.max_epoch:
-            if not os.path.exists(f'saves_new/{self.name}/{self.mode}'):
-                os.makedirs(f'saves_new/{self.name}/{self.mode}')
+            if not os.path.exists(f'saves_new/{self.expt}/{self.name}/{self.mode}'):
+                os.makedirs(f'saves_new/{self.expt}/{self.name}/{self.mode}')
 
             torch.save(self.model.state_dict(
-            ), f'saves_new/{self.name}/{self.mode}/{self.ckpt_name}training_epoch{epoch}.pkl')
+            ), f'saves_new/{self.expt}/{self.name}/{self.mode}/{self.ckpt_name}training_epoch{epoch}.pkl')
 
     def save_log(self):
-        logname = f'saves_new/{self.name}/{self.mode}/{self.ckpt_name}log.txt'
+        logname = f'saves_new/{self.expt}/{self.name}/{self.mode}/{self.ckpt_name}log.txt'
 
         with open(logname, 'w') as csv_file:
             writer = csv.writer(csv_file, delimiter='\t')
