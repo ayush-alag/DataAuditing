@@ -125,7 +125,7 @@ class Trainer():
                 pred = output.data.max(1)[1]
                 correct += pred.eq(labels.view(-1)).sum().item()
 
-        wandb.finish()
+
         train_loss /= len(self.train_loader)
         correct /= len(self.train_loader.dataset)
         test_loss, test_acc = self.test()
