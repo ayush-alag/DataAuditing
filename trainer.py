@@ -9,7 +9,6 @@ import wandb
 
 from arch import MLP
 
-
 def mixup_data(x, y, alpha=1.0, use_cuda=True):
     '''Returns mixed inputs, pairs of targets, and lambda'''
     if alpha > 0:
@@ -126,6 +125,7 @@ class Trainer():
                 pred = output.data.max(1)[1]
                 correct += pred.eq(labels.view(-1)).sum().item()
 
+        wandb.finish()
         train_loss /= len(self.train_loader)
         correct /= len(self.train_loader.dataset)
         test_loss, test_acc = self.test()
