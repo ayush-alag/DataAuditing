@@ -39,6 +39,7 @@ parser.add_argument('--qsize', type=int, default=2000)
 parser.add_argument('--mixup', type=int, default=0)
 parser.add_argument('--use_own', dest='use_own', action='store_true')
 parser.add_argument('--expt', type=str, default='')
+parser.add_argument('--dropout', type=float, default=0.0)
 
 args = parser.parse_args()
 
@@ -69,8 +70,8 @@ if args.audit == 'EMA':
 
 # initialize
 if args.dataset == 'MNIST':
-    model_train = MLP.MLP(28, args.dim, 10, args.dropout_probability).to(device)
-    model_cal = MLP.MLP(28, args.dim, 10, args.dropout_probability).to(device)
+    model_train = MLP.MLP(28, args.dim, 10, args.dropout).to(device)
+    model_cal = MLP.MLP(28, args.dim, 10, args.dropout).to(device)
 elif args.dataset == 'COVIDx':
     model_train = models.resnet18(pretrained=False, num_classes=2).to(device)
     model_cal = models.resnet18(pretrained=False, num_classes=2).to(device)
@@ -86,16 +87,21 @@ if args.use_own:
     # Use the fold-specific calibration model
     ckpt_name_cal += f'useown_fold{args.fold}_'
 
+if not os.path.exists(f'./saves_new/{args.expt}/{args.dataset}'):
+    os.makedirs(f'./saves_new/{args.expt}/{args.dataset}/')
+    os.makedirs(f'./saves_new/{args.expt}/{args.dataset}/base')
+    os.makedirs(f'./saves_new/{args.expt}/{args.dataset}/cal')
+
 if args.dataset == 'MNIST':
     model_train.load_state_dict(torch.load(
-        f'./saves_new/MNIST/base/{ckpt_name_base}training_epoch{args.epoch}.pkl', map_location=torch.device(device)))
+        f'./saves_new/{args.expt}/MNIST/base/{ckpt_name_base}training_epoch{args.epoch}.pkl', map_location=torch.device(device)))
     model_cal.load_state_dict(torch.load(
-        f'./saves_new/MNIST/cal/{ckpt_name_cal}training_epoch{args.epoch}.pkl', map_location=torch.device(device)))
+        f'./saves_new/{args.expt}/MNIST/cal/{ckpt_name_cal}training_epoch{args.epoch}.pkl', map_location=torch.device(device)))
 elif args.dataset == 'COVIDx':
     model_train.load_state_dict(torch.load(
-        f'./saves_new/COVIDx/base/{ckpt_name_base}training_epoch{args.epoch}.pkl', map_location=torch.device(device)))
+        f'./saves_new/{args.expt}/COVIDx/base/{ckpt_name_base}training_epoch{args.epoch}.pkl', map_location=torch.device(device)))
     model_cal.load_state_dict(torch.load(
-        f'./saves_new/COVIDx/cal/{ckpt_name_cal}training_epoch{args.epoch}.pkl', map_location=torch.device(device)))
+        f'./saves_new/{args.expt}/COVIDx/cal/{ckpt_name_cal}training_epoch{args.epoch}.pkl', map_location=torch.device(device)))
 
 model_train.to(device)
 model_cal.to(device)

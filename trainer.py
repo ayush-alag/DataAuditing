@@ -32,7 +32,7 @@ def mixup_criterion(criterion, pred, y_a, y_b, lam):
 
 
 class Trainer():
-    def __init__(self, dataset, name, dim, criterion, max_epoch, mode='base', ckpt_name='', mixup=False, dropout_probability=0, expt=""):
+    def __init__(self, dataset, name, dim, criterion, max_epoch, mode='base', ckpt_name='', mixup=False, dropout_probability=0, expt="", plateau=-1):
         wandb.init(project=expt)
         wandb.config = {
             "dimensions": dim,
@@ -61,6 +61,11 @@ class Trainer():
         elif self.name =='COVIDx':
             self.optimizer = optim.Adam(self.model.parameters(
         ), lr=self.get_lr(0), weight_decay=1e-7)
+
+        self.plateau = plateau
+        if plateau != -1:
+            self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', patience=plateau)
+
         self.res = []
 
         self.mode = mode
@@ -115,9 +120,9 @@ class Trainer():
                 output = self.model(images)
                 loss = self.criterion(output, labels)
             
-            wandb.log({"loss": loss})
-            wandb.watch(self.model)
-
+            if self.plateau != -1:
+                self.scheduler.step(loss)
+                
             loss.backward()
             train_loss += loss.item()
             self.optimizer.step()
@@ -126,6 +131,8 @@ class Trainer():
                 pred = output.data.max(1)[1]
                 correct += pred.eq(labels.view(-1)).sum().item()
 
+        wandb.log({"training loss": train_loss})
+        wandb.watch(self.model)
 
         train_loss /= len(self.train_loader)
         correct /= len(self.train_loader.dataset)

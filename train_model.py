@@ -31,6 +31,7 @@ if __name__ == "__main__":
     parser.add_argument('--train_size', type=int, default=2000)
     parser.add_argument('--dropout', type=float, default=0)
     parser.add_argument('--expt', type=str, default="")
+    parser.add_argument('--plateau', type=int, default=-1)
 
     args = parser.parse_args()
 
@@ -52,7 +53,8 @@ if __name__ == "__main__":
             MNIST_dataset.train_set, list(range(0, args.train_size)))
 
         MNIST_trainer = Trainer(dataset=MNIST_dataset, name=args.dataset, dim=args.dim, criterion=nn.NLLLoss(
-        ), max_epoch=args.epoch, mode=args.mode, ckpt_name=ckpt_name, mixup=args.mixup, dropout_probability=args.dropout, expt=args.expt)
+        ), max_epoch=args.epoch, mode=args.mode, ckpt_name=ckpt_name, mixup=args.mixup, dropout_probability=args.dropout, expt=args.expt,
+        plateau=args.plateau)
 
         MNIST_trainer.run()
     elif args.dataset == 'COVIDx':
