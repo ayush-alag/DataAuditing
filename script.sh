@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=PLATEAU     # create a short name for your job
+#SBATCH --job-name=PLATEAU20      # create a short name for your job
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks=1               # total number of tasks across all nodes
 #SBATCH --cpus-per-task=8        # cpu-cores per task (>1 if multi-threaded tasks)
@@ -21,12 +21,13 @@ I=0.0
 P=$1
 # P=-1
 
+## Train the base + calibration model and run audit
+# experiment="re-dropout$I"
+experiment="re-plateau$P"
+
 # Train the base model
 python train_model.py --mode base --dataset MNIST --batch_size 64 --epoch $epoch --train_size 10000 --dropout $I --expt $experiment --plateau $P
 
-## Train the calibration model and run audit
-# experiment="re-dropout$I"
-experiment="re-plateau$P"
 for k in 0 10 20 30 40 50
 do
     python train_model.py --mode cal --dataset MNIST --batch_size 64 --epoch $epoch --train_size 10000 --k $k --cal_data MNIST --dropout $I --expt $experiment --plateau $P
