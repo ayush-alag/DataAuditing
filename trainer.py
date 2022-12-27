@@ -5,9 +5,9 @@ import numpy as np
 import torch
 import torch.optim as optim
 from torchvision import models
+import wandb
 
 from arch import MLP
-
 
 def mixup_data(x, y, alpha=1.0, use_cuda=True):
     '''Returns mixed inputs, pairs of targets, and lambda'''
@@ -32,7 +32,14 @@ def mixup_criterion(criterion, pred, y_a, y_b, lam):
 
 
 class Trainer():
-    def __init__(self, dataset, name, dim, criterion, max_epoch, mode='base', ckpt_name='', mixup=False):
+    def __init__(self, dataset, name, dim, criterion, max_epoch, mode='base', ckpt_name='', mixup=False, dropout_probability=0, expt="", plateau=-1):
+        wandb.init(project=expt)
+        wandb.config = {
+            "dimensions": dim,
+            "epochs": max_epoch,
+            "dataset": dataset,
+            "dropout": dropout_probability,
+        }
         self.name = name
         assert self.name in ['MNIST', 'COVIDx']
         self.dataset = dataset
@@ -42,7 +49,7 @@ class Trainer():
         self.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu")
         if self.name == 'MNIST':
-            self.model = MLP.MLP(28, dim, 10).to(self.device)
+            self.model = MLP.MLP(28, dim, 10, dropout_probability).to(self.device)
         else:
             self.model = models.resnet18(pretrained=False, num_classes=2).to(self.device)
         self.criterion = criterion
@@ -54,6 +61,11 @@ class Trainer():
         elif self.name =='COVIDx':
             self.optimizer = optim.Adam(self.model.parameters(
         ), lr=self.get_lr(0), weight_decay=1e-7)
+
+        self.plateau = plateau
+        if plateau != -1:
+            self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', patience=plateau)
+
         self.res = []
 
         self.mode = mode
@@ -61,6 +73,7 @@ class Trainer():
 
         self.mixup = mixup
         self.alpha = 1
+        self.expt = expt
 
     def test(self):
         self.model.eval()
@@ -106,7 +119,10 @@ class Trainer():
             else:
                 output = self.model(images)
                 loss = self.criterion(output, labels)
-
+            
+            if self.plateau != -1:
+                self.scheduler.step(loss)
+                
             loss.backward()
             train_loss += loss.item()
             self.optimizer.step()
@@ -114,6 +130,9 @@ class Trainer():
             if self.mixup == False:
                 pred = output.data.max(1)[1]
                 correct += pred.eq(labels.view(-1)).sum().item()
+
+        wandb.log({"training loss": train_loss})
+        wandb.watch(self.model)
 
         train_loss /= len(self.train_loader)
         correct /= len(self.train_loader.dataset)
@@ -137,14 +156,14 @@ class Trainer():
 
     def save_ckpt(self, epoch):
         if epoch % 10 == 0 or epoch == self.max_epoch:
-            if not os.path.exists(f'saves_new/{self.name}/{self.mode}'):
-                os.makedirs(f'saves_new/{self.name}/{self.mode}')
+            if not os.path.exists(f'saves_new/{self.expt}/{self.name}/{self.mode}'):
+                os.makedirs(f'saves_new/{self.expt}/{self.name}/{self.mode}')
 
             torch.save(self.model.state_dict(
-            ), f'saves_new/{self.name}/{self.mode}/{self.ckpt_name}training_epoch{epoch}.pkl')
+            ), f'saves_new/{self.expt}/{self.name}/{self.mode}/{self.ckpt_name}training_epoch{epoch}.pkl')
 
     def save_log(self):
-        logname = f'saves_new/{self.name}/{self.mode}/{self.ckpt_name}log.txt'
+        logname = f'saves_new/{self.expt}/{self.name}/{self.mode}/{self.ckpt_name}log.txt'
 
         with open(logname, 'w') as csv_file:
             writer = csv.writer(csv_file, delimiter='\t')

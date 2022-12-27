@@ -47,7 +47,7 @@ class mia(object):
 
         
     def _scaled_logits(self, confs):
-        return np.log(np.divide(confs, 1 - confs))
+        return np.log(np.divide(confs, 1 - confs + 1e-30))
 
     def _log_value(self, probs, small_value=1e-30):
         return -np.log(np.maximum(probs, small_value))
