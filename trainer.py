@@ -119,9 +119,6 @@ class Trainer():
             else:
                 output = self.model(images)
                 loss = self.criterion(output, labels)
-            
-            if self.plateau != -1:
-                self.scheduler.step(loss)
                 
             loss.backward()
             train_loss += loss.item()
@@ -131,6 +128,10 @@ class Trainer():
                 pred = output.data.max(1)[1]
                 correct += pred.eq(labels.view(-1)).sum().item()
 
+        # call at the epoch level
+        if self.plateau != -1:
+            self.scheduler.step(loss)
+            
         wandb.log({"training loss": train_loss})
         wandb.watch(self.model)
 
@@ -173,6 +174,7 @@ class Trainer():
                 writer.writerow(row)
 
     def run(self):
+        print(self.expt)
         for epoch in range(1, self.max_epoch+1):
             print(f'Starting epoch {epoch}')
             self.train(epoch)
