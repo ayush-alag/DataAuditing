@@ -1,11 +1,12 @@
 import os
-import pickle
+import ast
+import configparser
 
 import numpy as np
 import torch
 import torchvision
 import torchvision.transforms as transforms
-from torch.utils.data import ConcatDataset, Subset
+from torch.utils.data import ConcatDataset, Subset, TensorDataset
 from torch.utils.data.dataloader import DataLoader
 
 from config import *
@@ -229,3 +230,191 @@ class COVIDxDataModule():
 
     def test_dataloader(self):
         return DataLoader(self.test_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=False)
+
+
+
+class LocationDataModule():
+    def __init__(self, dataset, num_workers: int = DEFAULT_NUM_WORKERS, k: float = 0, mode: str = 'base', calset: str = 'Location', use_own: bool = False, fold: int = 0):
+        self.dataset=dataset
+
+        self.config = configparser.ConfigParser()
+        self.config.read('config.ini')
+
+        print("initializing from config..")
+
+        self.batch_size = int(self.config[self.dataset]["batch_size"])
+        self.num_workers = num_workers
+
+        self.k = k
+        self.calset = calset
+        self.use_own = use_own
+        self.fold = fold
+        self.mode = mode
+
+        self.output_dims = int(self.config[self.dataset]["num_classes"])
+
+        (x_train,_), _ = self.input_data_user()
+        self.input_shape = x_train.shape[1:]
+
+        self.data_filepath=str(self.config[dataset]['all_data_path'])
+        self.index_filepath=str(self.config[dataset]['shuffle_index'])
+
+        self.user_training_data_range=self.config[dataset]['user_training_data_index_range']
+        self.user_training_data_range=ast.literal_eval(self.user_training_data_range)
+
+        self.user_testing_data_range=self.config[dataset]['user_testing_data_index_range']
+        self.user_testing_data_range=ast.literal_eval(self.user_testing_data_range)
+
+        self.defense_member_data_index_range=self.config[dataset]['defense_member_data_index_range']
+        self.defense_member_data_index_range=ast.literal_eval(self.defense_member_data_index_range)
+
+        self.defense_nonmember_data_index_range=self.config[dataset]['defense_nonmember_data_index_range']
+        self.defense_nonmember_data_index_range=ast.literal_eval(self.defense_nonmember_data_index_range)
+
+
+        self.attacker_train_member_data_range=self.config[dataset]['attacker_train_member_data_range']
+        self.attacker_train_member_data_range=ast.literal_eval(self.attacker_train_member_data_range)
+
+        self.attacker_train_nonmember_data_range=self.config[dataset]['attacker_train_nonmember_data_range']
+        self.attacker_train_nonmember_data_range=ast.literal_eval(self.attacker_train_nonmember_data_range)
+
+        self.attacker_evaluate_member_data_range=self.config[dataset]['attacker_evaluate_member_data_range']
+        self.attacker_evaluate_member_data_range=ast.literal_eval(self.attacker_evaluate_member_data_range)
+
+        self.attacker_evaluate_nonmember_data_range=self.config[dataset]['attacker_evaluate_nonmember_data_range']
+        self.attacker_evaluate_nonmember_data_range=ast.literal_eval(self.attacker_evaluate_nonmember_data_range)
+
+        print("setting up..")
+        self.setup()
+
+
+    # set self.train_set and self.test_set
+    # base is the base model: get the data from the helper methods and set the variables
+    # query is how we generate our stats: one should be svhn, others should be from the datasetP
+    # calibration is to train the calibration models with different values of k: need to add a transform for location
+    def setup(self):
+        if self.mode == "base":
+            (x_train,y_train),(x_test,y_test) = self.input_data_user()
+            y_train, y_test = self.sanitize_train_test(y_train, y_test)
+
+            self.train_set = TensorDataset(torch.Tensor(x_train), torch.Tensor(y_train))
+            self.test_set = TensorDataset(torch.Tensor(x_test), torch.Tensor(y_test))
+            print("got base data..")
+
+        elif self.mode == 'query' or (self.mode == 'cal' and self.use_own):
+            (x_train,y_train),(x_test,y_test) = self.input_data_user()
+            y_train, y_test = self.sanitize_train_test(y_train, y_test)
+            trainset = TensorDataset(torch.Tensor(x_train), torch.Tensor(y_train))
+            self.test_set = TensorDataset(torch.Tensor(x_test), torch.Tensor(y_test))
+
+            # 1/5 of total training, size 200
+            if self.fold > 0 and self.fold <= self.config[self.dataset]["num_folds"]:
+                self.train_set = torch.utils.data.Subset(
+                    trainset, list(range((self.fold-1)*200, self.fold*200)))
+
+            elif self.fold == 0:  # SVHN of size 200
+                trainset_svhn = torchvision.datasets.SVHN(
+                    root='./data/svhn', split='train', download=True, transform=transform_svhn)
+                self.train_set = torch.utils.data.Subset(
+                    trainset_svhn, list(range(0, 200)))
+                    
+            else: # Unincluded fold in training of size 200
+                x_train_out, y_train_out = self.input_no_train_data()
+                y_train_out = self.sanitize_ydata(y_train_out)
+                self.train_set = TensorDataset(torch.Tensor(x_train_out), torch.Tensor(y_train_out))
+            
+            print("got query data..")
+
+        elif self.mode == 'cal':
+            # assume calset is also location!
+
+            (x_train, x_test), (x_test,y_test) = self.input_data_user()
+            y_train, y_test = self.sanitize_train_test(y_train, y_test)
+
+            # 3 to 3.5k for train, 4 to 4.5k for test: 1000 unseen examples total
+            (x_train_att, y_train_att), (x_test_att, y_test_att) = self.input_data_attacker_shallow_model_adv1()
+            x_data = np.concatenate(x_train_att, x_test_att)
+            y_train_att, y_test_att = self.sanitize_train_test(y_train_att, y_test_att)
+            y_data = np.concatenate(y_train_att, y_test_att)
+            trainset_ori = TensorDataset(torch.Tensor(x_data), torch.Tensor(y_data))
+
+            # how much gaussian noise to add??
+            sigma = np.sqrt(np.var(x_data))
+            noise = np.random.normal(0, sigma, x_data.shape)
+            x_data_noisy = x_data + noise
+            trainset_noise = TensorDataset(torch.Tensor(x_data_noisy), torch.Tensor(y_data))
+
+            # fraction of noisy vs non-noisy determined by k
+            trainset_ori = Subset(trainset_ori, list(
+                range(0, int((100-self.k)/100*len(trainset_ori)))))
+            trainset_noise = Subset(trainset_noise, list(
+                range(int((100-self.k)/100*len(trainset_noise)), int(len(trainset_noise)))))
+
+            # 1000 examples total
+            self.train_set = ConcatDataset(
+                [trainset_ori, trainset_noise])
+
+            # test set separate than training set
+            self.test_set = TensorDataset(torch.Tensor(x_test), torch.Tensor(y_test))
+            print("got cal data..")
+    
+    def sanitize_ydata(self, y_data):
+        y_data = y_data.astype(int)
+        return np.eye(self.output_dims, dtype='uint8')[y_data]
+    
+    def sanitize_train_test(self, y_train, y_test):
+        return self.sanitize_ydata(y_train), self.sanitize_ydata(y_test)
+    
+    # train from 0k to 1k, test from 1k to 2k
+    def input_data_user(self):
+        npzdata=np.load(self.data_filepath)
+        x_data=npzdata['x'][:,:]
+        y_data=npzdata['y'][:]
+
+        npzdata_index=np.load(self.index_filepath)
+        index_data=npzdata_index['x']
+        x_train_user=x_data[index_data[int(self.user_training_data_range["start"]):int(self.user_training_data_range["end"])],:]
+        x_test_user=x_data[index_data[int(self.user_testing_data_range["start"]):int(self.user_testing_data_range["end"])],:]
+        y_train_user=y_data[index_data[int(self.user_training_data_range["start"]):int(self.user_training_data_range["end"])]]
+        y_test_user=y_data[index_data[int(self.user_testing_data_range["start"]):int(self.user_testing_data_range["end"])]]
+        y_train_user=y_train_user-1.0
+        y_test_user=y_test_user-1.0
+
+        return (x_train_user,y_train_user),(x_test_user,y_test_user)
+    
+    # 2000 to 3000
+    def input_no_train_data(self):
+        npzdata=np.load(self.data_filepath)
+        x_data=npzdata['x'][:,:]
+        y_data=npzdata['y'][:]
+
+        npzdata_index=np.load(self.index_filepath)
+        index_data=npzdata_index['x']
+        x_nonmember_train=x_data[index_data[int(self.attacker_nonmember_even["start"]):int(self.attacker_nonmember_even["end"])],:]
+        y_nonmember_train=y_data[index_data[int(self.attacker_nonmember_even["start"]):int(self.attacker_nonmember_even["end"])],:]
+        y_nonmember_train=y_nonmember_train-1.0
+
+        return x_nonmember_train, y_nonmember_train
+    
+    def train_dataloader(self):
+        return DataLoader(self.train_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
+
+    def test_dataloader(self):
+        return DataLoader(self.test_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=False)
+
+
+    def input_data_attacker_shallow_model_adv1(self):
+        npzdata=np.load(self.data_filepath)
+        x_data=npzdata['x'][:,:]
+        y_data=npzdata['y'][:]
+        npzdata_index=np.load(self.index_filepath)
+        index_data=npzdata_index['x']
+
+        x_train_member_attacker=x_data[index_data[int(self.attacker_train_member_data_range["start"]):int(self.attacker_train_member_data_range["end"])],:]
+        x_train_nonmember_attacker=x_data[index_data[int(self.attacker_train_nonmember_data_range["start"]):int(self.attacker_train_nonmember_data_range["end"])],:]
+        y_train_member_attacker=y_data[index_data[int(self.attacker_train_member_data_range["start"]):int(self.attacker_train_member_data_range["end"])]]
+        y_train_nonmumber_attacker=y_data[index_data[int(self.attacker_train_nonmember_data_range["start"]):int(self.attacker_train_nonmember_data_range["end"])]]
+        y_train_member_attacker=y_train_member_attacker-1.0
+        y_train_nonmumber_attacker=y_train_nonmumber_attacker-1.0
+
+        return (x_train_member_attacker,y_train_member_attacker),(x_train_nonmember_attacker,y_train_nonmumber_attacker)

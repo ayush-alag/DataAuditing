@@ -7,7 +7,7 @@ import torch.optim as optim
 from torchvision import models
 import wandb
 
-from arch import MLP
+from arch import MLP, LocationModel
 
 def mixup_data(x, y, alpha=1.0, use_cuda=True):
     '''Returns mixed inputs, pairs of targets, and lambda'''
@@ -41,7 +41,7 @@ class Trainer():
             "dropout": dropout_probability,
         }
         self.name = name
-        assert self.name in ['MNIST', 'COVIDx']
+        assert self.name in ['MNIST', 'COVIDx', 'Location']
         self.dataset = dataset
         self.train_loader = dataset.train_dataloader()
         self.test_loader = dataset.test_dataloader()
@@ -50,6 +50,8 @@ class Trainer():
             "cuda" if torch.cuda.is_available() else "cpu")
         if self.name == 'MNIST':
             self.model = MLP.MLP(28, dim, 10, dropout_probability).to(self.device)
+        elif self.name == "Location":
+            self.model = LocationModel.LocationMLP(dataset.input_shape, dataset.output_dims, dropout_probability).to(self.device)
         else:
             self.model = models.resnet18(pretrained=False, num_classes=2).to(self.device)
         self.criterion = criterion
@@ -61,6 +63,10 @@ class Trainer():
         elif self.name =='COVIDx':
             self.optimizer = optim.Adam(self.model.parameters(
         ), lr=self.get_lr(0), weight_decay=1e-7)
+        elif self.name == 'Location':
+            self.optimizer = optim.SGD(self.model.parameters(
+        ), lr=self.get_lr(0), momentum=0.9, weight_decay=1e-4)
+        # add for location dataset!
 
         self.plateau = plateau
         if plateau != -1:
@@ -154,6 +160,8 @@ class Trainer():
             if (epoch+1) > 10:
                 return 5e-6
             return 2e-5
+        elif self.name == 'Location':
+            return 0.1 * np.exp(0.1, epoch // 150)
 
     def save_ckpt(self, epoch):
         if epoch % 10 == 0 or epoch == self.max_epoch:
