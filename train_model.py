@@ -3,8 +3,7 @@ import argparse
 import torch
 import torch.nn as nn
 
-from data_utils import COVIDxDataModule, MNISTDataModule
-from MemGuard.input_data_class import LocationDataModule
+from data_utils import COVIDxDataModule, MNISTDataModule, LocationDataModule
 from trainer import Trainer
 
 if __name__ == "__main__":
@@ -73,10 +72,10 @@ if __name__ == "__main__":
     
     elif args.dataset == 'Location':
         # need to add base vs cal data splits!
-        Location_dataset = LocationDataModule(batch_size=args.batch_size,
-                                         mode=args.mode, k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold)
+        Location_dataset = LocationDataModule(mode=args.mode, k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold)
         
         Location_trainer = Trainer(dataset=Location_dataset, name=args.dataset, dim=args.dim, criterion=nn.CrossEntropyLoss(
-            reduction='mean'), max_epoch=args.epoch, mode=args.mode, ckpt_name=ckpt_name, mixup=args.mixup)
+            reduction='mean'), max_epoch=args.epoch, mode=args.mode, ckpt_name=ckpt_name, mixup=args.mixup, dropout_probability=args.dropout, 
+            expt=args.expt, plateau=args.plateau)
         
         Location_trainer.run()

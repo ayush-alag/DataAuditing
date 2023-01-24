@@ -6,8 +6,11 @@ import torch
 import torch.optim as optim
 from torchvision import models
 import wandb
+import math
 
 from arch import MLP, LocationModel
+
+from torchinfo import summary
 
 def mixup_data(x, y, alpha=1.0, use_cuda=True):
     '''Returns mixed inputs, pairs of targets, and lambda'''
@@ -56,7 +59,7 @@ class Trainer():
             self.model = models.resnet18(pretrained=False, num_classes=2).to(self.device)
         self.criterion = criterion
         self.max_epoch = max_epoch
-
+        
         if self.name == 'MNIST':
             self.optimizer = optim.SGD(self.model.parameters(
         ), lr=self.get_lr(0), momentum=0.9, weight_decay=1e-4)
@@ -161,10 +164,13 @@ class Trainer():
                 return 5e-6
             return 2e-5
         elif self.name == 'Location':
-            return 0.1 * np.exp(0.1, epoch // 150)
+            return 0.1 * math.pow(0.1, epoch // 150)
 
     def save_ckpt(self, epoch):
         if epoch % 10 == 0 or epoch == self.max_epoch:
+            print("saving model..")
+            print(f'saves_new/{self.expt}/{self.name}/{self.mode}/{self.ckpt_name}training_epoch{epoch}.pkl')
+
             if not os.path.exists(f'saves_new/{self.expt}/{self.name}/{self.mode}'):
                 os.makedirs(f'saves_new/{self.expt}/{self.name}/{self.mode}')
 

@@ -8,8 +8,8 @@ import torch.nn.functional as F
 from scipy.stats import ks_2samp
 from torchvision import models
 
-from arch import MLP
-from data_utils import COVIDxDataModule, MNISTDataModule
+from arch import MLP, LocationModel
+from data_utils import COVIDxDataModule, MNISTDataModule, LocationDataModule
 from MIA.mia_threshold import mia
 
 parser = argparse.ArgumentParser(description='Run an experiment.')
@@ -55,6 +55,10 @@ if args.dataset == 'MNIST':
 elif args.dataset == 'COVIDx':
     queryset = COVIDxDataModule(batch_size=args.batch_size, mode='query',
                                 k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold)
+elif args.dataset == 'Location':
+    queryset = LocationDataModule(mode='query', k=args.k, calset=args.cal_data, use_own=args.use_own,
+                                 fold=args.fold)
+
 dataloader_query_train = queryset.train_dataloader()
 
 # Yangsibo: we also need to load the calibration set, and a test set for the calibration set (e.g. the MNIST test set)
@@ -65,6 +69,9 @@ if args.audit == 'EMA':
     elif args.dataset == 'COVIDx':
         dataset = COVIDxDataModule(batch_size=args.batch_size,
                                    mode='cal', k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold)
+    elif args.dataset == 'Location':
+        dataset = LocationDataModule(mode='cal', k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold)
+
     dataloader_cal_train = dataset.train_dataloader()
     dataloader_cal_test = dataset.test_dataloader()
 
@@ -75,6 +82,9 @@ if args.dataset == 'MNIST':
 elif args.dataset == 'COVIDx':
     model_train = models.resnet18(pretrained=False, num_classes=2).to(device)
     model_cal = models.resnet18(pretrained=False, num_classes=2).to(device)
+elif args.dataset == 'Location':
+    model_train = LocationModel.LocationMLP(dataset.input_shape, dataset.output_dims, args.dropout).to(device)
+    model_cal = LocationModel.LocationMLP(dataset.input_shape, dataset.output_dims, args.dropout).to(device)
 
 # load weights
 ckpt_name_base = ''
@@ -102,6 +112,11 @@ elif args.dataset == 'COVIDx':
         f'./saves_new/{args.expt}/COVIDx/base/{ckpt_name_base}training_epoch{args.epoch}.pkl', map_location=torch.device(device)))
     model_cal.load_state_dict(torch.load(
         f'./saves_new/{args.expt}/COVIDx/cal/{ckpt_name_cal}training_epoch{args.epoch}.pkl', map_location=torch.device(device)))
+elif args.dataset == 'Location':
+    model_train.load_state_dict(torch.load(
+        f'./saves_new/{args.expt}/Location/base/{ckpt_name_base}training_epoch{args.epoch}.pkl', map_location=torch.device(device)))
+    model_cal.load_state_dict(torch.load(
+        f'./saves_new/{args.expt}/Location/cal/{ckpt_name_cal}training_epoch{args.epoch}.pkl', map_location=torch.device(device)))
 
 model_train.to(device)
 model_cal.to(device)
@@ -166,8 +181,12 @@ if args.audit == 'EMA':
         print(
             f'Size of query output {query_output.shape}, size of calibration train set {cal_train_output.shape}, size of calibration test set {cal_test_output.shape}')
 
+    num_class = args.nclass
+    if args.dataset == 'Location':
+        num_class = 30
+
     MIA = mia(cal_train_output, cal_train_output_y, cal_test_output,
-              cal_test_output_y, query_output, query_output_y, num_classes=args.nclass)
+              cal_test_output_y, query_output, query_output_y, num_classes=num_class)
     res = MIA._run_mia()
     print('Finish cal set')
 
