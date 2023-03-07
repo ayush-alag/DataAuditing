@@ -33,18 +33,15 @@ dataset="Location"
 python train_model.py --mode base --dataset $dataset --batch_size 64 --epoch $epoch --train_size 10000 --dropout $I --expt $experiment --plateau $P
 # For MemGuard: train defense model
 python train_model.py --mode defense --dataset $dataset --batch_size 64 --epoch 400 --train_size 10000 --expt $experiment
-# TODO: uncomment the below and run it
-# # For MemGuard: run defense script
-python run_memguard.py --mode defense_eval --dataset $dataset --expt $experiment --def_epoch 400
 
-# for k in 0 10 20 30 40 50
-# do
-#     python train_model.py --mode cal --dataset $dataset --batch_size 64 --epoch $epoch --train_size 10000 --k $k --cal_data $dataset --dropout $I --expt $experiment --plateau $P
-#     # python run_audit.py --k $k --fold 0 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I
-#     python run_audit.py --k $k --fold 1 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --memguard True
-#     python run_audit.py --k $k --fold 2 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --memguard True
-#     python run_audit.py --k $k --fold 3 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --memguard True
-#     python run_audit.py --k $k --fold 4 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --memguard True
-#     python run_audit.py --k $k --fold 5 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --memguard True
-#     python run_audit.py --k $k --fold 6 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --memguard True
-# done
+for k in 0 10 20 30 40 50
+do
+    python train_model.py --mode cal --dataset $dataset --batch_size 64 --epoch $epoch --train_size 10000 --k $k --cal_data $dataset --dropout $I --expt $experiment --plateau $P
+    # python run_audit.py --k $k --fold 0 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I
+    python run_audit.py --k $k --fold 1 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --memguard True
+    python run_audit.py --k $k --fold 2 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --memguard True
+    python run_audit.py --k $k --fold 3 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --memguard True
+    python run_audit.py --k $k --fold 4 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --memguard True
+    python run_audit.py --k $k --fold 5 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --memguard True
+    python run_audit.py --k $k --fold 6 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --memguard True
+done

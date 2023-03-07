@@ -14,8 +14,6 @@ from datasets.covidxdataset import COVIDxDataset
 from datasets.cxrdataset import init_CXR
 
 from arch import LocationModel
-import torch.optim as optim
-import torch.nn as nn
 
 
 class AddGaussianNoise(object):
@@ -363,31 +361,27 @@ class LocationDataModule():
             (x_train,y_train),(x_test,y_test) = self.input_data_user()
             y_train, y_test = self.sanitize_train_test(y_train, y_test)
 
-            trainset = TensorDataset(torch.Tensor(x_train), self.clean_y(y_train))
             self.test_set = TensorDataset(torch.Tensor(x_test), self.clean_y(y_test))
 
             # 1/5 of total training, size 200
             if self.fold > 0 and self.fold <= int(self.config[self.dataset]["num_folds"]):
-                self.train_set = torch.utils.data.Subset(
-                    trainset, list(range((self.fold-1)*200, self.fold*200)))
+                self.x_eval = x_train[(self.fold - 1)*200 : self.fold*200]
+                self.y_eval = y_train[(self.fold - 1)*200 : self.fold*200]
+                self.l_eval = np.zeros(200)
                 self.input_shape = x_train.shape[1:]
+                self.trainset = TensorDataset(torch.Tensor(self.x_eval), self.clean_y(self.y_eval))
 
                 # load in the trained model and run it on this subset (for sanity checking)
-
-            # TODO: get a random tabular dataset!
-            elif self.fold == 0:  # SVHN of size 200
-                trainset_svhn = torchvision.datasets.SVHN(
-                    root='./data/svhn', split='train', download=True, transform=transform_svhn)
-                self.train_set = torch.utils.data.Subset(
-                    trainset_svhn, list(range(0, 200)))
-                img, _ = self.train_set[0]
-                self.input_shape = img.shape[1:]
                     
-            else: # Unincluded fold in training of size 200
-                x_train_out, y_train_out = self.input_no_train_data()
-                y_train_out = self.sanitize_ydata(y_train_out)
+            elif self.fold != 0: # Unincluded fold in training of size 200
+                self.x_eval, y_train_out = self.input_no_train_data()
+                self.y_eval = self.sanitize_ydata(y_train_out)
+                self.l_eval = np.ones(200)
                 self.input_shape = x_train.shape[1:]
-                self.train_set = TensorDataset(torch.Tensor(x_train_out), self.clean_y(y_train_out))
+                self.train_set = TensorDataset(torch.Tensor(self.x_eval), self.clean_y(self.y_eval))
+            
+            else:  # fold 0 / other tabular dataset not supported
+                print("error! not supported")
             
             print("got query data..")
 

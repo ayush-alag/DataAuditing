@@ -1,17 +1,16 @@
 import argparse
-import csv
 import os
 import pickle
 
 import numpy as np
 import torch
 import torch.nn.functional as F
-from scipy.stats import ks_2samp
 from torchvision import models
 
 from arch import MLP, LocationModel
 from data_utils import COVIDxDataModule, MNISTDataModule, LocationDataModule
 from MIA.mia_threshold import mia
+from run_memguard import create_defense_logits
 
 parser = argparse.ArgumentParser(description='Run an experiment.')
 parser.add_argument('--dim', type=int, default=256, help='hidden dim of MLP')
@@ -42,6 +41,8 @@ parser.add_argument('--use_own', dest='use_own', action='store_true')
 parser.add_argument('--expt', type=str, default='')
 parser.add_argument('--dropout', type=float, default=0.0)
 parser.add_argument('--memguard', type=bool, default=False)
+parser.add_argument('--def_epoch', type=int, default=400)
+parser.add_argument('--randomize_memguard', type=bool, default=True)
 
 args = parser.parse_args()
 
@@ -128,31 +129,39 @@ model_cal.eval()
 
 ## Utilized with memguard
 if args.memguard:
-    # 1. run the trained shadow/calibration model on the input data
-    # 2. create a NEW model that performs ML to say yes/no for training dataset based on output.
-    # we supplant this with EMA
-    # 3. 
+    # raffle the query dataset off to the defense framework
+    print("Creating the defense logits...")
+    create_defense_logits(queryset, name_prefix="k={k}fold={fold}".format(k=args.k, fold=args.fold), 
+                          dataset=args.dataset, expt=args.expt, def_epoch=args.def_epoch)
+    print("Finished creating the defense logits...")
 
-    evaluation_noise_filepath = f"saves_new/{args.expt}/{args.dataset}/attack/noise_data_evaluation.npz"
-    print(evaluation_noise_filepath)
+    # load the adversarial examples
+    evaluation_noise_filepath = f"saves_new/{args.expt}/{args.dataset}/attack/k={args.k}fold={args.fold}noise_data_evaluation.npz"
+    print("Received filepath:\n", evaluation_noise_filepath)
     if not os.path.isfile(evaluation_noise_filepath):
         raise FileNotFoundError
     npz_defense=np.load(evaluation_noise_filepath)
+
     f_evaluate_noise=npz_defense['defense_output']
     f_evaluate_origin=npz_defense['tc_output']
-    f_evaluate_origin_score=npz_defense['predict_origin']
-    f_evaluate_defense_score=npz_defense['predict_modified']
 
-    f_evaluate_defense=np.zeros(f_evaluate_noise.shape,dtype=np.float)
-    np.random.seed(100)  #one time randomness, fix the seed
-    for i in np.arange(f_evaluate_defense.shape[0]):
-        if np.random.rand(1)<0.5:
-            f_evaluate_defense[i,:]=f_evaluate_noise[i,:]
-        else:
-            f_evaluate_defense[i,:]=f_evaluate_origin[i,:]
+    print("origin shape", f_evaluate_origin.shape)
+    print("noise shape", f_evaluate_noise.shape)
+
+    # mix noisy + original logits
+    if args.randomize_memguard:
+        f_evaluate_defense=np.zeros(f_evaluate_noise.shape,dtype=np.float)
+        np.random.seed(100)  # one time randomness, fix the seed
+        for i in np.arange(f_evaluate_defense.shape[0]):
+            if np.random.rand(1)<0.5:
+                f_evaluate_defense[i,:]=f_evaluate_noise[i,:]
+            else:
+                f_evaluate_defense[i,:]=f_evaluate_origin[i,:]
+    else:
+        f_evaluate_defense = f_evaluate_noise
     
-    f_evaluate_defense=np.sort(f_evaluate_defense, axis=1)
-    f_evaluate_origin=np.sort(f_evaluate_origin, axis=1)
+    # f_evaluate_defense=np.sort(f_evaluate_defense, axis=1)
+    # f_evaluate_origin=np.sort(f_evaluate_origin, axis=1)
 
 if args.audit == 'EMA':
     cal_train_output = []  # outputs of train samples in cal set with the cal model
@@ -163,19 +172,30 @@ if args.audit == 'EMA':
     query_output_y = []
 
     with torch.no_grad():
-        for images, labels in dataloader_query_train:  # first, get query_output
-            images = images.to(device)
-            labels = labels.to(device)
-            if args.dataset == 'MNIST':
-                out_train = torch.exp(model_train(images))
-            else:
-                out_train = torch.exp(F.log_softmax(
-                    model_train(images), dim=-1))
-            # print(out_train)
+        if args.memguard:
+            predicted_logits = f_evaluate_defense
+            out_train = torch.exp(F.log_softmax(predicted_logits, dim=-1))
             query_output.append(out_train)
-            query_output_y.append(labels)
+            query_output_y.append(queryset.y_eval)
+            
+        else:
+            for images, labels in dataloader_query_train:  # first, get query_output
+                images = images.to(device)
+                labels = labels.to(device)
 
-        query_output_y = torch.cat(query_output_y).detach().cpu().numpy()
+                # we either use the memguard results or original inference results
+                predicted_logits = model_train(images)
+
+                if args.dataset == 'MNIST':
+                    out_train = torch.exp(predicted_logits)
+                else:
+                    out_train = torch.exp(F.log_softmax(predicted_logits, dim=-1))
+                    
+                # print(out_train)
+                query_output.append(out_train)
+                query_output_y.append(labels)
+
+            query_output_y = torch.cat(query_output_y).detach().cpu().numpy()
 
     query_output = torch.cat(query_output).detach().cpu().numpy()
     print(f'Finish query set, fold {args.fold}')
