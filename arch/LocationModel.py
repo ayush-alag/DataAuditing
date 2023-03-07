@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -19,7 +20,6 @@ class LocationMLP(nn.Module):
       self.final_block = nn.Sequential(nn.Linear(128, self.dim_out), nn.BatchNorm1d(self.dim_out))
 
    def forward(self, x):
-      print(x.shape)
       x = self.first_block(x)
       x = self.second_block(x)
       x = self.third_block(x)
@@ -28,8 +28,9 @@ class LocationMLP(nn.Module):
       return x
 
 class DefenseMLP(nn.Module):
+   # dim_out should be 1
    def __init__(self, dim_in, dim_out):
-      super(LocationMLP, self).__init__()
+      super(DefenseMLP, self).__init__()
       self.dim_in = dim_in[0]
       self.dim_out = dim_out
       self.first_block = nn.Sequential(nn.Linear(self.dim_in, 256), nn.BatchNorm1d(256),
@@ -42,4 +43,5 @@ class DefenseMLP(nn.Module):
       x = self.first_block(x)
       x = self.second_block(x)
       x = self.final_block(x)
+      x = torch.sigmoid(x)
       return x

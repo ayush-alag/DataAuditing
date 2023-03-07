@@ -3,6 +3,7 @@ import csv
 import os
 import pickle
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from scipy.stats import ks_2samp
@@ -40,6 +41,7 @@ parser.add_argument('--mixup', type=int, default=0)
 parser.add_argument('--use_own', dest='use_own', action='store_true')
 parser.add_argument('--expt', type=str, default='')
 parser.add_argument('--dropout', type=float, default=0.0)
+parser.add_argument('--memguard', type=bool, default=False)
 
 args = parser.parse_args()
 
@@ -123,6 +125,34 @@ model_cal.to(device)
 
 model_train.eval()
 model_cal.eval()
+
+## Utilized with memguard
+if args.memguard:
+    # 1. run the trained shadow/calibration model on the input data
+    # 2. create a NEW model that performs ML to say yes/no for training dataset based on output.
+    # we supplant this with EMA
+    # 3. 
+
+    evaluation_noise_filepath = f"saves_new/{args.expt}/{args.dataset}/attack/noise_data_evaluation.npz"
+    print(evaluation_noise_filepath)
+    if not os.path.isfile(evaluation_noise_filepath):
+        raise FileNotFoundError
+    npz_defense=np.load(evaluation_noise_filepath)
+    f_evaluate_noise=npz_defense['defense_output']
+    f_evaluate_origin=npz_defense['tc_output']
+    f_evaluate_origin_score=npz_defense['predict_origin']
+    f_evaluate_defense_score=npz_defense['predict_modified']
+
+    f_evaluate_defense=np.zeros(f_evaluate_noise.shape,dtype=np.float)
+    np.random.seed(100)  #one time randomness, fix the seed
+    for i in np.arange(f_evaluate_defense.shape[0]):
+        if np.random.rand(1)<0.5:
+            f_evaluate_defense[i,:]=f_evaluate_noise[i,:]
+        else:
+            f_evaluate_defense[i,:]=f_evaluate_origin[i,:]
+    
+    f_evaluate_defense=np.sort(f_evaluate_defense, axis=1)
+    f_evaluate_origin=np.sort(f_evaluate_origin, axis=1)
 
 if args.audit == 'EMA':
     cal_train_output = []  # outputs of train samples in cal set with the cal model

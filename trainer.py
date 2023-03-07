@@ -44,6 +44,7 @@ class Trainer():
             "dropout": dropout_probability,
         }
         self.name = name
+        self.mode = mode
         assert self.name in ['MNIST', 'COVIDx', 'Location']
         self.dataset = dataset
         self.train_loader = dataset.train_dataloader()
@@ -54,7 +55,10 @@ class Trainer():
         if self.name == 'MNIST':
             self.model = MLP.MLP(28, dim, 10, dropout_probability).to(self.device)
         elif self.name == "Location":
-            self.model = LocationModel.LocationMLP(dataset.input_shape, dataset.output_dims, dropout_probability).to(self.device)
+            if self.mode == 'defense':
+                self.model = LocationModel.DefenseMLP(dataset.input_shape, dataset.output_dims).to(self.device)
+            else:
+                self.model = LocationModel.LocationMLP(dataset.input_shape, dataset.output_dims, dropout_probability).to(self.device)
         else:
             self.model = models.resnet18(pretrained=False, num_classes=2).to(self.device)
         self.criterion = criterion
@@ -69,15 +73,12 @@ class Trainer():
         elif self.name == 'Location':
             self.optimizer = optim.SGD(self.model.parameters(
         ), lr=self.get_lr(0), momentum=0.9, weight_decay=1e-4)
-        # add for location dataset!
 
         self.plateau = plateau
         if plateau != -1:
             self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', patience=plateau)
 
         self.res = []
-
-        self.mode = mode
         self.ckpt_name = ckpt_name
 
         self.mixup = mixup
@@ -96,8 +97,14 @@ class Trainer():
 
                 output = self.model(images)
                 class_loss = self.criterion(output, labels).item()
-                pred = output.data.max(1)[1]
-                correct += pred.eq(labels.view(-1)).sum().item()
+
+                if output.data.shape[1] == 1:
+                    pred = np.where(np.asarray(output.data.detach().cpu()) >= 0.5, 1, 0)
+                    correct += np.sum(pred == labels.detach().cpu().numpy().astype(int))
+                else:
+                    pred = output.data.max(1)[1]
+                    correct += pred.eq(labels.view(-1)).sum().item()
+
                 test_loss += class_loss
 
         test_loss /= len(self.test_loader)
@@ -134,8 +141,13 @@ class Trainer():
             self.optimizer.step()
 
             if self.mixup == False:
-                pred = output.data.max(1)[1]
-                correct += pred.eq(labels.view(-1)).sum().item()
+                # print(output.data, labels)
+                if output.data.shape[1] == 1:
+                    pred = np.where(np.asarray(output.data.detach().cpu()) >= 0.5, 1, 0)
+                    correct += np.sum(pred == labels.detach().cpu().numpy().astype(int))
+                else:
+                    pred = output.data.max(1)[1]
+                    correct += pred.eq(labels.view(-1)).sum().item()
 
         # call at the epoch level
         if self.plateau != -1:

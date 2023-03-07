@@ -13,6 +13,10 @@ from config import *
 from datasets.covidxdataset import COVIDxDataset
 from datasets.cxrdataset import init_CXR
 
+from arch import LocationModel
+import torch.optim as optim
+import torch.nn as nn
+
 
 class AddGaussianNoise(object):
     def __init__(self, mean=0., std=1.):
@@ -234,7 +238,7 @@ class COVIDxDataModule():
 
 
 class LocationDataModule():
-    def __init__(self, num_workers: int = DEFAULT_NUM_WORKERS, k: float = 0, mode: str = 'base', calset: str = 'Location', use_own: bool = False, fold: int = 0):
+    def __init__(self, num_workers: int = DEFAULT_NUM_WORKERS, k: float = 0, mode: str = 'base', calset: str = 'Location', use_own: bool = False, fold: int = 0, expt=""):
         self.dataset = 'location'
 
         config = configparser.ConfigParser()
@@ -251,8 +255,10 @@ class LocationDataModule():
         self.use_own = use_own
         self.fold = fold
         self.mode = mode
+        self.expt = expt
 
         self.output_dims = int(self.config[self.dataset]["num_classes"])
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.data_filepath=str(self.config[self.dataset]['all_data_path'])
         self.index_filepath=str(self.config[self.dataset]['shuffle_index'])
@@ -310,6 +316,49 @@ class LocationDataModule():
             self.test_set = TensorDataset(torch.Tensor(x_test), self.clean_y(y_test))
             print("got base data..")
 
+        elif self.mode == "defense":
+            (x_train, y_train, l_train) = self.input_data_defender()
+            y_train, l_train = self.sanitize_train_test(y_train, l_train)
+
+            # load the TRAINED base model
+            input_shape=x_train.shape[1:]
+            self.model = LocationModel.LocationMLP(input_shape, self.output_dims, dropout_probability=0.0)
+            model_dict = torch.load(f'saves_new/{self.expt}/Location/base/training_epoch200.pkl')
+            self.model.load_state_dict(model_dict)
+            self.model.eval()
+
+            # self.criterion=nn.CrossEntropyLoss(reduction='mean')
+            # class_loss = self.criterion(output, labels).item()
+            # pred = output.data.max(1)[1]
+            x_train = torch.from_numpy(x_train).float()
+            f_train = self.model(x_train)
+            f_train, _ = torch.sort(f_train, axis=1)
+            f_train = f_train.detach()
+
+            self.input_shape = f_train.shape[1:]
+            self.output_dims = 1
+
+            l_train = torch.tensor(np.expand_dims(l_train, axis=1), dtype=torch.float32)
+
+            print(f_train)
+            print(l_train)
+
+            print(f_train.shape)
+            print(l_train.shape)
+
+            self.train_set = TensorDataset(f_train, l_train)
+            # don't care abt test performance
+            self.test_set = TensorDataset(f_train, l_train)
+        
+        elif self.mode == "defense_eval":
+            (x_evaluate,y_evaluate,l_evaluate) = self.input_data_attacker_evaluate()
+            y_evaluate, l_evaluate = self.sanitize_train_test(y_evaluate, l_evaluate)
+
+            # access from outside
+            self.x_eval = torch.from_numpy(x_evaluate).float()
+            self.y_eval = torch.from_numpy(y_evaluate).float()
+            self.l_eval = torch.from_numpy(l_evaluate).float()
+            
         elif self.mode == 'query' or (self.mode == 'cal' and self.use_own):
             (x_train,y_train),(x_test,y_test) = self.input_data_user()
             y_train, y_test = self.sanitize_train_test(y_train, y_test)
@@ -322,6 +371,8 @@ class LocationDataModule():
                 self.train_set = torch.utils.data.Subset(
                     trainset, list(range((self.fold-1)*200, self.fold*200)))
                 self.input_shape = x_train.shape[1:]
+
+                # load in the trained model and run it on this subset (for sanity checking)
 
             # TODO: get a random tabular dataset!
             elif self.fold == 0:  # SVHN of size 200
@@ -397,6 +448,48 @@ class LocationDataModule():
         y_test_user=y_test_user-1.0
 
         return (x_train_user,y_train_user),(x_test_user,y_test_user)
+    
+    # evaluating output from 0k to 1k, 1k to 2k as above
+    def input_data_defender(self):
+        npzdata=np.load(self.data_filepath)
+        x_data=npzdata['x'][:,:]
+        y_data=npzdata['y'][:]
+
+        npzdata_index=np.load(self.index_filepath)
+        index_data=npzdata_index['x']
+        x_train_user=x_data[index_data[int(self.defense_member_data_index_range["start"]):int(self.defense_member_data_index_range["end"])],:]
+        x_nontrain_defender=x_data[index_data[int(self.defense_nonmember_data_index_range["start"]):int(self.defense_nonmember_data_index_range["end"])],:]
+        y_train_user=y_data[index_data[int(self.defense_member_data_index_range["start"]):int(self.defense_member_data_index_range["end"])]]
+        y_nontrain_defender=y_data[index_data[int(self.defense_nonmember_data_index_range["start"]):int(self.defense_nonmember_data_index_range["end"])]]
+
+        x_train_defender=np.concatenate((x_train_user,x_nontrain_defender),axis=0)
+        y_train_defender=np.concatenate((y_train_user,y_nontrain_defender),axis=0)
+        y_train_defender=y_train_defender-1.0
+
+        label_train_defender=np.zeros([x_train_defender.shape[0]],dtype=np.int)
+        label_train_defender[0:x_train_user.shape[0]]=1
+        return (x_train_defender,y_train_defender,label_train_defender)
+
+    def input_data_attacker_evaluate(self):
+        print("Attacker evaluate member data range: {}".format(self.attacker_evaluate_member_data_range))
+        print("Attacker evaluate nonmember data range: {}".format(self.attacker_evaluate_nonmember_data_range))
+        npzdata=np.load(self.data_filepath)
+        x_data=npzdata['x'][:,:]
+        y_data=npzdata['y'][:]
+        npzdata_index=np.load(self.index_filepath)
+        index_data=npzdata_index['x']
+
+        x_evaluate_member_attacker=x_data[index_data[int(self.attacker_evaluate_member_data_range["start"]):int(self.attacker_evaluate_member_data_range["end"])],:]
+        x_evaluate_nonmember_attacker=x_data[index_data[int(self.attacker_evaluate_nonmember_data_range["start"]):int(self.attacker_evaluate_nonmember_data_range["end"])],:]
+        y_evaluate_member_attacker=y_data[index_data[int(self.attacker_evaluate_member_data_range["start"]):int(self.attacker_evaluate_member_data_range["end"])]]
+        y_evaluate_nonmumber_attacker=y_data[index_data[int(self.attacker_evaluate_nonmember_data_range["start"]):int(self.attacker_evaluate_nonmember_data_range["end"])]]
+        x_evaluate_attacker=np.concatenate((x_evaluate_member_attacker,x_evaluate_nonmember_attacker),axis=0)
+        y_evaluate_attacker=np.concatenate((y_evaluate_member_attacker,y_evaluate_nonmumber_attacker),axis=0)
+        y_evaluate_attacker=y_evaluate_attacker-1.0
+        label_evaluate_attacker=np.zeros([x_evaluate_attacker.shape[0]],dtype=np.int)
+        label_evaluate_attacker[0:x_evaluate_member_attacker.shape[0]]=1
+
+        return (x_evaluate_attacker,y_evaluate_attacker,label_evaluate_attacker)
     
     # 2000 to 3000
     def input_no_train_data(self):

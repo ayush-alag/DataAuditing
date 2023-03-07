@@ -40,6 +40,8 @@ if __name__ == "__main__":
     elif args.mode == 'cal':
         ckpt_name = 'caldata={}_k={}_size={}'.format(
             args.cal_data, args.k, args.train_size)
+    elif args.mode == 'defense':
+        ckpt_name = 'defense={}'.format(args.cal_data)
     if args.mixup:
         ckpt_name += 'mixup_'
     if args.use_own:
@@ -72,10 +74,15 @@ if __name__ == "__main__":
     
     elif args.dataset == 'Location':
         # need to add base vs cal data splits!
-        Location_dataset = LocationDataModule(mode=args.mode, k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold)
+        print("Location dataset...")
+        Location_dataset = LocationDataModule(mode=args.mode, k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold, expt=args.expt)
         
-        Location_trainer = Trainer(dataset=Location_dataset, name=args.dataset, dim=args.dim, criterion=nn.CrossEntropyLoss(
-            reduction='mean'), max_epoch=args.epoch, mode=args.mode, ckpt_name=ckpt_name, mixup=args.mixup, dropout_probability=args.dropout, 
+        print("Location trainer...")
+        criterion = nn.CrossEntropyLoss(reduction='mean')
+        if args.mode == "defense":
+            criterion = nn.BCELoss()
+            
+        Location_trainer = Trainer(dataset=Location_dataset, name=args.dataset, dim=args.dim, criterion=criterion, max_epoch=args.epoch, mode=args.mode, ckpt_name=ckpt_name, mixup=args.mixup, dropout_probability=args.dropout, 
             expt=args.expt, plateau=args.plateau)
         
         Location_trainer.run()
