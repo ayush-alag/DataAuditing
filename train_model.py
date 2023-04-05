@@ -3,8 +3,17 @@ import argparse
 import torch
 import torch.nn as nn
 
-from data_utils import COVIDxDataModule, MNISTDataModule, LocationDataModule
+from data_utils import COVIDxDataModule, MNISTDataModule, LocationDataModule, MNISTLeNetModule
 from trainer import Trainer
+
+def t_or_f(arg):
+    ua = str(arg).upper()
+    if 'TRUE'.startswith(ua):
+       return True
+    elif 'FALSE'.startswith(ua):
+       return False
+    else:
+       pass  #error condition maybe?
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run an experiment.')
@@ -32,6 +41,7 @@ if __name__ == "__main__":
     parser.add_argument('--dropout', type=float, default=0)
     parser.add_argument('--expt', type=str, default="")
     parser.add_argument('--plateau', type=int, default=-1)
+    parser.add_argument('--lenet', type=t_or_f, default=False)
 
     args = parser.parse_args()
 
@@ -49,14 +59,19 @@ if __name__ == "__main__":
     print(ckpt_name)
 
     if args.dataset == 'MNIST':
-        MNIST_dataset = MNISTDataModule(batch_size=args.batch_size,
-                                        mode=args.mode, k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold)
+        if args.lenet:
+            MNIST_dataset = MNISTLeNetModule(batch_size=args.batch_size,
+                                            mode=args.mode, k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold)
+        else:
+            MNIST_dataset = MNISTDataModule(batch_size=args.batch_size,
+                                mode=args.mode, k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold)
+            
         MNIST_dataset.train_set = torch.utils.data.Subset(
             MNIST_dataset.train_set, list(range(0, args.train_size)))
 
         MNIST_trainer = Trainer(dataset=MNIST_dataset, name=args.dataset, dim=args.dim, criterion=nn.NLLLoss(
         ), max_epoch=args.epoch, mode=args.mode, ckpt_name=ckpt_name, mixup=args.mixup, dropout_probability=args.dropout, expt=args.expt,
-        plateau=args.plateau)
+        plateau=args.plateau, lenet=args.lenet)
 
         MNIST_trainer.run()
         
@@ -68,7 +83,8 @@ if __name__ == "__main__":
         print(len(COVID_dataset.train_set))
 
         COVID_trainer = Trainer(dataset=COVID_dataset, name=args.dataset, dim=args.dim, criterion=nn.CrossEntropyLoss(
-            reduction='mean'), max_epoch=args.epoch, mode=args.mode, ckpt_name=ckpt_name, mixup=args.mixup)
+            reduction='mean'), max_epoch=args.epoch, mode=args.mode, ckpt_name=ckpt_name, mixup=args.mixup, expt=args.expt,
+            dropout_probability=args.dropout)
 
         COVID_trainer.run()
     

@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=mem-run      # create a short name for your job
+#SBATCH --job-name=mem-no-mix    # create a short name for your job
 #SBATCH --nodes=1                # node count
-#SBATCH --ntasks=1               # total number of tasks across all nodes
+#SBATCH --ntasks=16              # total number of tasks across all nodes
 #SBATCH --cpus-per-task=8        # cpu-cores per task (>1 if multi-threaded tasks)
 #SBATCH --mem-per-cpu=2G         # memory per cpu-core (4G is default)
 #SBATCH --time=0-05:00:00        # total run time limit (days-HH:MM:SS)
@@ -24,7 +24,7 @@ I=0.0
 P=-1
 
 ## Train the base + calibration model and run audit
-experiment="MemGuard"
+experiment="MemGuard_noMixup"
 # experiment="re-plateau$P"
 dataset="Location"
 # dataset="MNIST"
@@ -34,14 +34,32 @@ python train_model.py --mode base --dataset $dataset --batch_size 64 --epoch $ep
 # For MemGuard: train defense model
 python train_model.py --mode defense --dataset $dataset --batch_size 64 --epoch 400 --train_size 10000 --expt $experiment
 
+# For MemGuard: run defense script on the query folds
+for fold in 1 2 3 4 5 6
+do
+    srun python run_memguard.py --dataset $dataset --expt $experiment --def_epoch 400 --fold $fold &
+done
+
+wait
+
+# train the calibration model
 for k in 0 10 20 30 40 50
 do
-    python train_model.py --mode cal --dataset $dataset --batch_size 64 --epoch $epoch --train_size 10000 --k $k --cal_data $dataset --dropout $I --expt $experiment --plateau $P
-    # python run_audit.py --k $k --fold 0 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I
-    python run_audit.py --k $k --fold 1 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --memguard True
-    python run_audit.py --k $k --fold 2 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --memguard True
-    python run_audit.py --k $k --fold 3 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --memguard True
-    python run_audit.py --k $k --fold 4 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --memguard True
-    python run_audit.py --k $k --fold 5 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --memguard True
-    python run_audit.py --k $k --fold 6 --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --memguard True
+    echo k $k
+    srun python train_model.py --mode cal --dataset $dataset --batch_size 64 --epoch $epoch --train_size 10000 --k $k --cal_data $dataset --dropout $I --expt $experiment --plateau $P &
+done
+
+wait
+
+# evaluate the audit based on memguard flags
+memguard=True
+mixup=True
+
+for k in 0 10 20 30 40 50
+do
+    for fold in 1 2 3 4 5 6
+    do
+        echo k $k fold $fold
+        srun python run_audit.py --k $k --fold $fold --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --memguard $memguard --randomize_memguard $mixup &
+    done
 done

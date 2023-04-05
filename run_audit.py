@@ -8,9 +8,18 @@ import torch.nn.functional as F
 from torchvision import models
 
 from arch import MLP, LocationModel
-from data_utils import COVIDxDataModule, MNISTDataModule, LocationDataModule
+from data_utils import COVIDxDataModule, MNISTDataModule, LocationDataModule, MNISTLeNetModule
 from MIA.mia_threshold import mia
-from run_memguard import create_defense_logits
+from trainer import append_dropout
+
+def t_or_f(arg):
+    ua = str(arg).upper()
+    if 'TRUE'.startswith(ua):
+       return True
+    elif 'FALSE'.startswith(ua):
+       return False
+    else:
+       pass  #error condition maybe?
 
 parser = argparse.ArgumentParser(description='Run an experiment.')
 parser.add_argument('--dim', type=int, default=256, help='hidden dim of MLP')
@@ -42,7 +51,8 @@ parser.add_argument('--expt', type=str, default='')
 parser.add_argument('--dropout', type=float, default=0.0)
 parser.add_argument('--memguard', type=bool, default=False)
 parser.add_argument('--def_epoch', type=int, default=400)
-parser.add_argument('--randomize_memguard', type=bool, default=True)
+parser.add_argument('--randomize_memguard', type=t_or_f, default=True)
+parser.add_argument('--lenet', type=t_or_f, default=False)
 
 args = parser.parse_args()
 
@@ -53,8 +63,12 @@ num_classes = 10
 
 
 if args.dataset == 'MNIST':
-    queryset = MNISTDataModule(batch_size=args.batch_size, mode='query',
-                               k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold)
+    if not args.lenet:
+        queryset = MNISTDataModule(batch_size=args.batch_size, mode='query',
+                                k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold)
+    else:
+        queryset = MNISTLeNetModule(batch_size=args.batch_size, mode='query',
+                                k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold)
 elif args.dataset == 'COVIDx':
     queryset = COVIDxDataModule(batch_size=args.batch_size, mode='query',
                                 k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold)
@@ -67,8 +81,13 @@ dataloader_query_train = queryset.train_dataloader()
 # Yangsibo: we also need to load the calibration set, and a test set for the calibration set (e.g. the MNIST test set)
 if args.audit == 'EMA':
     if args.dataset == 'MNIST':
-        dataset = MNISTDataModule(batch_size=args.batch_size,
-                                  mode='cal', k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold)
+        if not args.lenet:
+            dataset = MNISTDataModule(batch_size=args.batch_size, mode='cal', k=args.k, calset=args.cal_data,
+             use_own=args.use_own, fold=args.fold)
+        else:
+            dataset = MNISTLeNetModule(batch_size=args.batch_size, mode='cal', k=args.k, calset=args.cal_data,
+             use_own=args.use_own, fold=args.fold)
+
     elif args.dataset == 'COVIDx':
         dataset = COVIDxDataModule(batch_size=args.batch_size,
                                    mode='cal', k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold)
@@ -80,11 +99,18 @@ if args.audit == 'EMA':
 
 # initialize
 if args.dataset == 'MNIST':
-    model_train = MLP.MLP(28, args.dim, 10, args.dropout).to(device)
-    model_cal = MLP.MLP(28, args.dim, 10, args.dropout).to(device)
+    if not args.lenet:
+        model_train = MLP.MLP(28, args.dim, 10, args.dropout).to(device)
+        model_cal = MLP.MLP(28, args.dim, 10, args.dropout).to(device)
+    else:
+        model_train = MLP.LeNet5(10, args.dropout).to(device)
+        model_cal = MLP.LeNet5(10, args.dropout).to(device)
 elif args.dataset == 'COVIDx':
     model_train = models.resnet18(pretrained=False, num_classes=2).to(device)
     model_cal = models.resnet18(pretrained=False, num_classes=2).to(device)
+    append_dropout(model_train, args.dropout)
+    append_dropout(model_cal, args.dropout)
+
 elif args.dataset == 'Location':
     model_train = LocationModel.LocationMLP(dataset.input_shape, dataset.output_dims, args.dropout).to(device)
     model_cal = LocationModel.LocationMLP(dataset.input_shape, dataset.output_dims, args.dropout).to(device)
@@ -127,16 +153,12 @@ model_cal.to(device)
 model_train.eval()
 model_cal.eval()
 
-## Utilized with memguard
-if args.memguard:
-    # raffle the query dataset off to the defense framework
-    print("Creating the defense logits...")
-    create_defense_logits(queryset, name_prefix="k={k}fold={fold}".format(k=args.k, fold=args.fold), 
-                          dataset=args.dataset, expt=args.expt, def_epoch=args.def_epoch)
-    print("Finished creating the defense logits...")
+print("Memguard: ", args.memguard)
+print("Randomize Memguard: ", args.randomize_memguard)
 
+if args.memguard:
     # load the adversarial examples
-    evaluation_noise_filepath = f"saves_new/{args.expt}/{args.dataset}/attack/k={args.k}fold={args.fold}noise_data_evaluation.npz"
+    evaluation_noise_filepath = f"saves_new/{args.expt}/{args.dataset}/attack/fold={args.fold}noise_data_evaluation.npz"
     print("Received filepath:\n", evaluation_noise_filepath)
     if not os.path.isfile(evaluation_noise_filepath):
         raise FileNotFoundError
@@ -150,6 +172,7 @@ if args.memguard:
 
     # mix noisy + original logits
     if args.randomize_memguard:
+        print("mixing the memguard logits...")
         f_evaluate_defense=np.zeros(f_evaluate_noise.shape,dtype=np.float)
         np.random.seed(100)  # one time randomness, fix the seed
         for i in np.arange(f_evaluate_defense.shape[0]):
@@ -158,10 +181,17 @@ if args.memguard:
             else:
                 f_evaluate_defense[i,:]=f_evaluate_origin[i,:]
     else:
+        print("using all noisy memguard logits")
         f_evaluate_defense = f_evaluate_noise
     
-    # f_evaluate_defense=np.sort(f_evaluate_defense, axis=1)
-    # f_evaluate_origin=np.sort(f_evaluate_origin, axis=1)
+    y_eval = queryset.y_eval
+    y_pred_noisy = torch.Tensor(f_evaluate_defense).max(1)[1]
+    print(y_pred_noisy)
+    print(torch.Tensor(f_evaluate_origin).max(1)[1])
+    print(torch.Tensor(f_evaluate_noise).max(1)[1])
+    print(y_eval.view(-1))
+    accuracy = y_pred_noisy.eq(y_eval.view(-1)).sum().item() / len(y_eval)
+    print("REAL defended model accuracy (30-classes)", accuracy)
 
 if args.audit == 'EMA':
     cal_train_output = []  # outputs of train samples in cal set with the cal model
@@ -173,10 +203,12 @@ if args.audit == 'EMA':
 
     with torch.no_grad():
         if args.memguard:
+            print("evaluating memguard query...")
             predicted_logits = f_evaluate_defense
-            out_train = torch.exp(F.log_softmax(predicted_logits, dim=-1))
+            out_train = torch.exp(F.log_softmax(torch.Tensor(predicted_logits), dim=-1))
             query_output.append(out_train)
             query_output_y.append(queryset.y_eval)
+            query_output_y = torch.cat(query_output_y).detach().cpu().numpy()
             
         else:
             for images, labels in dataloader_query_train:  # first, get query_output
@@ -204,9 +236,9 @@ if args.audit == 'EMA':
             images = images.to(device)
             labels = labels.to(device)
             if args.dataset == 'MNIST':
-                out_cal = torch.exp(model_train(images))
+                out_cal = torch.exp(model_cal(images))
             else:
-                out_cal = torch.exp(F.log_softmax(model_train(images), dim=-1))
+                out_cal = torch.exp(F.log_softmax(model_cal(images), dim=-1))
 
             cal_train_output.append(out_cal)
             cal_train_output_y.append(labels)
@@ -215,9 +247,9 @@ if args.audit == 'EMA':
             images = images.to(device)
             labels = labels.to(device)
             if args.dataset == 'MNIST':
-                out_cal = torch.exp(model_train(images))
+                out_cal = torch.exp(model_cal(images))
             else:
-                out_cal = torch.exp(F.log_softmax(model_train(images), dim=-1))
+                out_cal = torch.exp(F.log_softmax(model_cal(images), dim=-1))
             cal_test_output.append(out_cal)
             cal_test_output_y.append(labels)
 

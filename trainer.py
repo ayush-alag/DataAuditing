@@ -31,9 +31,18 @@ def mixup_data(x, y, alpha=1.0, use_cuda=True):
 def mixup_criterion(criterion, pred, y_a, y_b, lam):
     return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
 
+def append_dropout(model, dropout=0.0):
+    for name, module in model.named_children():
+        if len(list(module.children())) > 0:
+            append_dropout(module)
+        if isinstance(module, torch.nn.ReLU):
+            new = torch.nn.Sequential(module, torch.nn.Dropout2d(p=dropout, inplace=True))
+            setattr(model, name, new)
+
 
 class Trainer():
-    def __init__(self, dataset, name, dim, criterion, max_epoch, mode='base', ckpt_name='', mixup=False, dropout_probability=0, expt="", plateau=-1):
+    def __init__(self, dataset, name, dim, criterion, max_epoch, mode='base', ckpt_name='', mixup=False, 
+                 dropout_probability=0, expt="", plateau=-1, lenet=False):
         wandb.init(project=expt)
         wandb.config = {
             "dimensions": dim,
@@ -51,7 +60,10 @@ class Trainer():
         self.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu")
         if self.name == 'MNIST':
-            self.model = MLP.MLP(28, dim, 10, dropout_probability).to(self.device)
+            if lenet:
+                self.model = MLP.LeNet5(10, dropout_probability).to(self.device)
+            else:
+                self.model = MLP.MLP(28, dim, 10, dropout_probability).to(self.device)
         elif self.name == "Location":
             if self.mode == 'defense':
                 self.model = LocationModel.DefenseMLP(dataset.input_shape, dataset.output_dims).to(self.device)
@@ -59,6 +71,8 @@ class Trainer():
                 self.model = LocationModel.LocationMLP(dataset.input_shape, dataset.output_dims, dropout_probability).to(self.device)
         else:
             self.model = models.resnet18(pretrained=False, num_classes=2).to(self.device)
+            append_dropout(self.model, dropout_probability)
+            
         self.criterion = criterion
         self.max_epoch = max_epoch
         
@@ -115,7 +129,9 @@ class Trainer():
         correct = 0
         train_loss = 0
 
-        for images, labels in self.train_loader:
+        for i, (images, labels) in enumerate(self.train_loader):
+            if i == 0:
+                print(images.shape)
             images = images.to(self.device)
             labels = labels.to(self.device)
 

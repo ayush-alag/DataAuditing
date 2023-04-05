@@ -27,3 +27,36 @@ class MLP(nn.Module):
         x = self.dropout(x)
         x = self.fc3(x)
         return F.log_softmax(x, dim=-1)
+
+class LeNet5(nn.Module):
+    def __init__(self, num_classes, dropout_probability=0.0):
+        super(LeNet5, self).__init__()
+        
+        self.num_classes = num_classes
+        in_channels = 3
+
+        self.features = nn.Sequential(
+            nn.Conv2d(in_channels, 6, kernel_size=5),
+            nn.Tanh(),
+            nn.MaxPool2d(kernel_size=2),
+            nn.Conv2d(6, 16, kernel_size=5),
+            nn.Tanh(),
+            nn.MaxPool2d(kernel_size=2)
+        )
+
+        self.classifier = nn.Sequential(
+            nn.Linear(16*5*5, 120),
+            nn.Tanh(),
+            nn.Dropout(dropout_probability),
+            nn.Linear(120, 84),
+            nn.Tanh(),
+            nn.Dropout(dropout_probability),
+            nn.Linear(84, num_classes),
+        )
+
+    def forward(self, x):
+        x = self.features(x)
+        x = torch.flatten(x, 1)
+        logits = self.classifier(x)
+        probas = F.log_softmax(logits, dim=1)
+        return probas
