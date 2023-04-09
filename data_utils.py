@@ -13,7 +13,7 @@ from config import *
 from datasets.covidxdataset import COVIDxDataset
 from datasets.cxrdataset import init_CXR
 
-from arch import LocationModel
+from arch import LocationModel, MLP
 
 
 class AddGaussianNoise(object):
@@ -85,13 +85,44 @@ transform_usps = transforms.Compose([
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 ])
 
+transform_gan = transforms.Compose([
+    transforms.ToPILImage(),
+    transforms.Resize((32, 32)),
+    transforms.Grayscale(num_output_channels=3),
+    transforms.ToTensor(),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+])
+
+transform_gan_noise = transforms.Compose([
+    transforms.ToPILImage(),
+    transforms.Resize((32, 32)),
+    transforms.Grayscale(num_output_channels=3),
+    transforms.ToTensor(),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    AddGaussianNoise(0., 3.)
+])
+
+transform_gan_rotate = transforms.Compose([
+    transforms.ToPILImage(),
+    transforms.Resize((32, 32)),
+    transforms.Grayscale(num_output_channels=3),
+    transforms.RandomRotation(90),
+    transforms.ToTensor(),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+])
+
+def transform_batch(transform_fxn, images):
+    all_tensors = torch.Tensor(len(images), 3, transform_fxn(images[0]).shape[1], transform_fxn(images[0]).shape[2])
+    for i, image in enumerate(images):
+        all_tensors[i] = transform_fxn(image)
+    return all_tensors
 
 DEFAULT_DATA_DIR = './data'
 DEFAULT_NUM_WORKERS = 16
 
 # need all data to have 32 x 32 x 3 rather than 28 x 28 x 1
 class MNISTLeNetModule():
-    def __init__(self, batch_size: int = 32, data_dir: str = DEFAULT_DATA_DIR, num_workers: int = DEFAULT_NUM_WORKERS, k: float = 0, mode: str = 'base', calset: str = 'MNIST', use_own: bool = False, fold: int = 0):
+    def __init__(self, batch_size: int = 32, data_dir: str = DEFAULT_DATA_DIR, num_workers: int = DEFAULT_NUM_WORKERS, k: float = 0, mode: str = 'base', calset: str = 'MNIST', use_own: bool = False, fold: int = 0, expt=""):
         self.dir = data_dir
         self.data_dir = os.path.join(self.dir, 'mnist')
         self.batch_size = batch_size
@@ -103,6 +134,7 @@ class MNISTLeNetModule():
         self.use_own = use_own
         self.fold = fold
         self.mode = mode
+        self.expt = expt
         self.setup()
     
     def setup(self):
@@ -176,6 +208,41 @@ class MNISTLeNetModule():
                     root=self.data_dir, train=True, download=True, transform=transform_lenet)
                 self.test_set = Subset(self.test_set, list(
                     range(0, len(self.train_set))))     # part of the train set
+        
+        # hardcoded to 300 epochs for lenet mnist case
+        elif self.mode == "cal_gan":
+            data_path = f'saves_new/{self.expt}/{self.calset}/cal_gan/samples/fake_images-0300.pt'
+            data = torch.load(data_path)
+
+            # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            device = "cpu"
+            model_train = MLP.LeNet5(10, 0.0).to(device)
+            model_train.load_state_dict(torch.load(f'./saves_new/{self.expt}/MNIST/base/training_epoch50.pkl', map_location=torch.device(device)))
+            model_train.eval()
+
+            original_train = transform_batch(transform_gan, data).to(device)
+            labels = model_train(original_train)
+            labels = labels.data.max(1)[1].detach()
+            self.num_workers = 1
+
+            trainset_ori = TensorDataset(original_train, labels)
+            trainset_rotate = TensorDataset(transform_batch(transform_gan_rotate, data), labels)
+            trainset_noise = TensorDataset(transform_batch(transform_gan_noise, data), labels)
+      
+            trainset_ori = Subset(trainset_ori, list(
+                range(0, int((100-self.k)/100*len(trainset_ori)))))
+            trainset_rotate = Subset(trainset_rotate, list(
+                range(int((100-self.k)/100*len(trainset_rotate)), int((100-self.k//2)/100*len(trainset_rotate)))))
+            trainset_noise = Subset(trainset_noise, list(
+                range(int((100-self.k//2)/100*len(trainset_noise)), len(trainset_noise))))
+            self.train_set = ConcatDataset(
+                [trainset_ori, trainset_rotate, trainset_noise])
+
+            self.test_set = torchvision.datasets.MNIST(
+                root=self.data_dir, train=True, download=True, transform=transform_lenet)
+            self.test_set = Subset(self.test_set, list(
+                range(0, len(self.train_set))))     # part of the train set
+
 
     def train_dataloader(self):
         return DataLoader(self.train_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)

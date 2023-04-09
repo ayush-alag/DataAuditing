@@ -47,7 +47,7 @@ if __name__ == "__main__":
 
     if args.mode == 'base':
         ckpt_name = ''
-    elif args.mode == 'cal':
+    elif args.mode == 'cal' or args.mode == "cal_gan":
         ckpt_name = 'caldata={}_k={}_size={}'.format(
             args.cal_data, args.k, args.train_size)
     elif args.mode == 'defense':
@@ -60,8 +60,8 @@ if __name__ == "__main__":
 
     if args.dataset == 'MNIST':
         if args.lenet:
-            MNIST_dataset = MNISTLeNetModule(batch_size=args.batch_size,
-                                            mode=args.mode, k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold)
+            MNIST_dataset = MNISTLeNetModule(batch_size=args.batch_size, mode=args.mode, k=args.k,
+                                              calset=args.cal_data, use_own=args.use_own, fold=args.fold, expt=args.expt)
         else:
             MNIST_dataset = MNISTDataModule(batch_size=args.batch_size,
                                 mode=args.mode, k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold)

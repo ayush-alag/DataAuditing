@@ -36,7 +36,7 @@ def append_dropout(model, dropout=0.0):
         if len(list(module.children())) > 0:
             append_dropout(module)
         if isinstance(module, torch.nn.ReLU):
-            new = torch.nn.Sequential(module, torch.nn.Dropout2d(p=dropout, inplace=True))
+            new = torch.nn.Sequential(module, torch.nn.Dropout2d(p=dropout))
             setattr(model, name, new)
 
 
