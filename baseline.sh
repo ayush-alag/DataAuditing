@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=lenet_base        # create a short name for your job
+#SBATCH --job-name=0sm_base        # create a short name for your job
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks=1               # total number of tasks across all nodes
 #SBATCH --cpus-per-task=8        # cpu-cores per task (>1 if multi-threaded tasks)
@@ -25,21 +25,22 @@ P=-1
 
 ## Train the base + calibration model and run audit
 # experiment="MNIST_base_50"
-experiment="Lenet_MNIST"
+experiment="SmallMNIST$I"
 # experiment="re-plateau$P"
 # dataset="Location"
 dataset="MNIST"
-lenet=True
+lenet=False
+small=True
 
 # Train the base model
-# python train_model.py --mode base --dataset $dataset --batch_size 64 --epoch $epoch --train_size 10000 --dropout $I --expt $experiment --plateau $P --lenet $lenet
+python train_model.py --mode base --dataset $dataset --batch_size 64 --epoch $epoch --train_size 10000 --dropout $I --expt $experiment --plateau $P --lenet $lenet --small $small
 
 # train the calibration model
-# for k in 0 10 20 30 40 50
-# do
-#     echo k $k
-#     python train_model.py --mode cal --dataset $dataset --batch_size 64 --epoch $epoch --train_size 10000 --k $k --cal_data $dataset --dropout $I --expt $experiment --plateau $P --lenet $lenet
-# done
+for k in 0 10 20 30 40 50
+do
+    echo k $k
+    python train_model.py --mode cal --dataset $dataset --batch_size 64 --epoch $epoch --train_size 10000 --k $k --cal_data $dataset --dropout $I --expt $experiment --plateau $P --lenet $lenet --small $small
+done
 
 # evaluate the audit based on memguard flags
 for k in 0 10 20 30 40 50
@@ -47,6 +48,6 @@ do
     for fold in 0 1 2 3 4 5 6
     do
         echo k $k fold $fold
-        python run_audit.py --k $k --fold $fold --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --lenet $lenet
+        python run_audit.py --k $k --fold $fold --audit EMA --epoch $epoch --cal_data $dataset --dataset $dataset --cal_size 10000 --expt $experiment --dropout $I --lenet $lenet --small $small
     done
 done

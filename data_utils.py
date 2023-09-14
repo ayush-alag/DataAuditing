@@ -111,6 +111,15 @@ transform_gan_rotate = transforms.Compose([
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 ])
 
+transform_covid_gan = transforms.Compose([
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+])
+
+transform_covid_noise = transforms.Compose([
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    AddGaussianNoise(0., 3.)
+])
+
 def transform_batch(transform_fxn, images):
     all_tensors = torch.Tensor(len(images), 3, transform_fxn(images[0]).shape[1], transform_fxn(images[0]).shape[2])
     for i, image in enumerate(images):
@@ -211,7 +220,7 @@ class MNISTLeNetModule():
         
         # hardcoded to 300 epochs for lenet mnist case
         elif self.mode == "cal_gan":
-            data_path = f'saves_new/{self.expt}/{self.calset}/cal_gan/samples/fake_images-0300.pt'
+            data_path = f'saves_new/{self.expt}/{self.calset}/cal/samples/fake_images-0300.pt'
             data = torch.load(data_path)
 
             # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -345,9 +354,8 @@ class MNISTDataModule():
     def test_dataloader(self):
         return DataLoader(self.test_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=False)
 
-
 class COVIDxDataModule():
-    def __init__(self, batch_size: int = 32, data_dir: str = DEFAULT_DATA_DIR, num_workers: int = DEFAULT_NUM_WORKERS, k: float = 0, mode: str = 'base', calset: str = 'COVID', use_own: bool = False, fold: int = 0):
+    def __init__(self, batch_size: int = 32, data_dir: str = DEFAULT_DATA_DIR, num_workers: int = DEFAULT_NUM_WORKERS, k: float = 0, mode: str = 'base', calset: str = 'COVID', use_own: bool = False, fold: int = 0, expt="", gan_epoch=300):
         self.dir = data_dir
         self.data_dir = os.path.join(self.dir, 'covid')
         self.batch_size = batch_size
@@ -358,6 +366,8 @@ class COVIDxDataModule():
         self.use_own = use_own
         self.fold = fold
         self.mode = mode
+        self.expt = expt
+        self.gan_epoch = gan_epoch
         self.setup()
 
     def setup(self):
@@ -411,6 +421,56 @@ class COVIDxDataModule():
 
                 self.test_set = torch.utils.data.Subset(trainset, list(range(
                     CONFIG['COVID']['CAL_TEST_INDEX_START'], CONFIG['COVID']['CAL_TEST_INDEX_END'])))
+                
+         # hardcoded to 300 epochs
+        elif self.mode == "cal_gan":
+            print("starting calibration")
+            data_path = f'saves_new/{self.expt}/COVIDx/cal/samples/fake_images-{self.gan_epoch:04d}.pt'
+            data = torch.load(data_path)
+
+            # device = "cpu"
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            model_train = torchvision.models.resnet18(pretrained=False, num_classes=2).to(device)
+            model_train.load_state_dict(torch.load(f'./saves_new/{self.expt}/COVIDx/base/training_epoch50.pkl', map_location=torch.device(device)))
+            model_train.eval()
+
+            # original_train = data.to(device)
+            original_train = transform_batch(transform_covid_gan, data)
+            del data
+
+            # run inference at a batchwise level
+            labels = torch.zeros(len(original_train), 2).cpu()
+            with torch.no_grad():
+                for i in range(0, len(original_train), self.batch_size):
+                    labels[i:i+self.batch_size] = model_train(original_train[i:i+self.batch_size].to(device)).cpu()
+            
+            labels = labels.data.max(1)[1]
+            self.num_workers = 1
+
+            trainset_ori = TensorDataset(original_train.cpu().detach(), labels.cpu().detach())
+            # noisy_data = torch.zeros(data.size(), dtype=torch.float)
+            # for i, image in enumerate(original_train):
+            #     noise = torch.tensor(np.random.normal(0, 3, image.size()), dtype=torch.float)
+            #     noisy_data[i] = image + noise
+
+            # trainset_noise = TensorDataset(noisy_data, labels)
+            trainset_noise = TensorDataset(transform_batch(transform_covid_noise, original_train).cpu().detach(), labels.cpu().detach())
+            del original_train
+
+            trainset_ori = Subset(trainset_ori, list(
+                range(0, int((100-self.k)/100*len(trainset_ori)))))
+            trainset_noise = Subset(trainset_noise, list(
+                range(int((100-self.k)/100*len(trainset_noise)), len(trainset_noise))))
+            self.train_set = ConcatDataset(
+                [trainset_ori, trainset_noise])
+
+            test_set = COVIDxDataset(n_classes=2, dataset_path='./data/covid/',
+                dim=(224, 224))
+
+            self.test_set = torch.utils.data.Subset(test_set, list(range(
+                CONFIG['COVID']['CAL_TEST_INDEX_START'], CONFIG['COVID']['CAL_TEST_INDEX_END'])))
+            
+            print("done calibration")
 
     def train_dataloader(self):
         return DataLoader(self.train_set, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)

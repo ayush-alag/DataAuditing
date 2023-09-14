@@ -42,7 +42,7 @@ def append_dropout(model, dropout=0.0):
 
 class Trainer():
     def __init__(self, dataset, name, dim, criterion, max_epoch, mode='base', ckpt_name='', mixup=False, 
-                 dropout_probability=0, expt="", plateau=-1, lenet=False):
+                 dropout_probability=0, expt="", plateau=-1, lenet=False, small=False):
         wandb.init(project=expt)
         wandb.config = {
             "dimensions": dim,
@@ -52,6 +52,9 @@ class Trainer():
         }
         self.name = name
         self.mode = mode
+        if mode == "cal_gan":
+            self.mode = "cal"
+            
         assert self.name in ['MNIST', 'COVIDx', 'Location']
         self.dataset = dataset
         self.train_loader = dataset.train_dataloader()
@@ -62,6 +65,8 @@ class Trainer():
         if self.name == 'MNIST':
             if lenet:
                 self.model = MLP.LeNet5(10, dropout_probability).to(self.device)
+            elif small:
+                self.model = MLP.SmallMLP(28, dim, 10, dropout_probability).to(self.device)
             else:
                 self.model = MLP.MLP(28, dim, 10, dropout_probability).to(self.device)
         elif self.name == "Location":

@@ -51,6 +51,7 @@ if __name__ == "__main__":
    parser.add_argument('--dim', type=int, default=256, help='hidden dim of MLP')
    parser.add_argument('--epochs', type=int, default=50, help="50 or 200 training")
    parser.add_argument('--lenet', type=t_or_f, default=False)
+   parser.add_argument('--small', type=t_or_f, default=False)
 
    args = parser.parse_args()
 
@@ -70,7 +71,13 @@ if __name__ == "__main__":
          (model.final_block[0], 'weight'),
       )
    elif args.dataset == "MNIST":
-      if not args.lenet:
+      if args.small:
+         model = MLP.SmallMLP(28, args.dim, 10, args.dropout).to(device)
+         parameters_to_prune = (
+            (model.fc1, 'weight'),
+            (model.fc2, 'weight'),
+         )
+      elif not args.lenet:
          model = MLP.MLP(28, args.dim, 10, args.dropout).to(device)
          parameters_to_prune = (
             (model.fc1, 'weight'),
@@ -181,7 +188,40 @@ if __name__ == "__main__":
       )
 
    elif args.dataset == "MNIST":
-      if not args.lenet:
+      if args.small:
+         print(
+            "Sparsity in fc1.weight: {:.2f}%".format(
+               100. * float(torch.sum(model.fc1.weight == 0))
+               / float(model.fc1.weight.nelement())
+            )
+         )
+         print(
+            "Sparsity in fc2.weight: {:.2f}%".format(
+               100. * float(torch.sum(model.fc2.weight == 0))
+               / float(model.fc2.weight.nelement())
+            )
+         )
+         print(
+            "Sparsity in fc3.weight: {:.2f}%".format(
+               100. * float(torch.sum(model.fc3.weight == 0))
+               / float(model.fc3.weight.nelement())
+            )
+         )
+         print(
+            "Global sparsity: {:.2f}%".format(
+               100. * float(
+                     torch.sum(model.fc1.weight == 0)
+                     + torch.sum(model.fc2.weight == 0)
+                     + torch.sum(model.fc3.weight == 0)
+               )
+               / float(
+                     model.fc1.weight.nelement()
+                     + model.fc2.weight.nelement()
+                     + model.fc3.weight.nelement()
+               )
+            )
+         )
+      elif not args.lenet:
          print(
             "Sparsity in fc1.weight: {:.2f}%".format(
                100. * float(torch.sum(model.fc1.weight == 0))

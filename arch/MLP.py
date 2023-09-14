@@ -28,6 +28,24 @@ class MLP(nn.Module):
         x = self.fc3(x)
         return F.log_softmax(x, dim=-1)
 
+class SmallMLP(nn.Module):
+    def __init__(self, dim_in, dim_hidden, dim_out, dropout_probability):
+        super(SmallMLP, self).__init__()
+        self.fc1 = nn.Linear(dim_in*dim_in*3, dim_hidden)
+        self.bn1 = nn.BatchNorm1d(dim_hidden)
+        self.relu1 = nn.ReLU(dim_hidden)
+        self.fc2 = nn.Linear(dim_hidden, dim_out)
+        self.dropout = nn.Dropout(dropout_probability)
+
+    def forward(self, x):
+        x = x.view(-1, 28*28*3)
+        x = self.fc1(x)
+        x = self.bn1(x)
+        x = self.relu1(x)
+        x = self.dropout(x)
+        x = self.fc2(x)
+        return F.log_softmax(x, dim=-1)
+
 class LeNet5(nn.Module):
     def __init__(self, num_classes, dropout_probability=0.0):
         super(LeNet5, self).__init__()

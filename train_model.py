@@ -5,6 +5,7 @@ import torch.nn as nn
 
 from data_utils import COVIDxDataModule, MNISTDataModule, LocationDataModule, MNISTLeNetModule
 from trainer import Trainer
+import random
 
 def t_or_f(arg):
     ua = str(arg).upper()
@@ -42,8 +43,15 @@ if __name__ == "__main__":
     parser.add_argument('--expt', type=str, default="")
     parser.add_argument('--plateau', type=int, default=-1)
     parser.add_argument('--lenet', type=t_or_f, default=False)
+    parser.add_argument('--small', type=t_or_f, default=False)
+    parser.add_argument('--seed', type=int, default=-1)
+    parser.add_argument('--gan_epoch', type=int, default=300)
 
     args = parser.parse_args()
+
+    if args.seed != -1:
+        torch.manual_seed(args.seed)
+        random.seed(args.seed)
 
     if args.mode == 'base':
         ckpt_name = ''
@@ -71,13 +79,14 @@ if __name__ == "__main__":
 
         MNIST_trainer = Trainer(dataset=MNIST_dataset, name=args.dataset, dim=args.dim, criterion=nn.NLLLoss(
         ), max_epoch=args.epoch, mode=args.mode, ckpt_name=ckpt_name, mixup=args.mixup, dropout_probability=args.dropout, expt=args.expt,
-        plateau=args.plateau, lenet=args.lenet)
+        plateau=args.plateau, lenet=args.lenet, small=args.small)
 
         MNIST_trainer.run()
         
     elif args.dataset == 'COVIDx':
-        COVID_dataset = COVIDxDataModule(batch_size=args.batch_size,
-                                         mode=args.mode, k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold)
+        print("reached COVIDx")
+        COVID_dataset = COVIDxDataModule(batch_size=args.batch_size, expt=args.expt,
+                                         mode=args.mode, k=args.k, calset=args.cal_data, use_own=args.use_own, fold=args.fold, gan_epoch=args.gan_epoch)
         # COVID_dataset.train_set = torch.utils.data.Subset(
         #     COVID_dataset.train_set, list(range(0, args.train_size)))
         print(len(COVID_dataset.train_set))

@@ -1,3 +1,4 @@
+from data_utils import COVIDxDataModule
 import torch
 from torchvision.transforms import ToTensor, Normalize, Compose
 from torchvision.datasets import MNIST
@@ -5,6 +6,8 @@ import torch.nn as nn
 import os
 from torchvision.utils import save_image
 from torch.utils.data import DataLoader
+import numpy as np
+import random
 import argparse
 
 def denorm(x):
@@ -44,18 +47,20 @@ def train_discriminator(images, batch_size, latent_size):
     
     return d_loss, real_score, fake_score
 
-def save_fake_images(index, sample_vectors):
+def save_fake_images(index, sample_vectors, max_epoch):
     fake_images = G(sample_vectors)
-    fake_images = fake_images.reshape(fake_images.size(0), 1, 28, 28)
+    fake_images = fake_images.reshape(fake_images.size(0), args.channels, args.image_size, args.image_size)
 
     # save png images
     fake_fname = 'fake_images-{0:0=4d}.png'.format(index)
     print('Saving', fake_fname)
-    save_image(denorm(fake_images), os.path.join(sample_dir, fake_fname), nrow=50)
+    fake_images_short = fake_images[:100]
+    save_image(denorm(fake_images_short), os.path.join(sample_dir, fake_fname), nrow=10)
 
     # save tensors
-    fake_ptname = 'fake_images-{0:0=4d}.pt'.format(index)
-    torch.save(denorm(fake_images), os.path.join(sample_dir, fake_ptname))
+    if index == max_epoch:
+        fake_ptname = 'fake_images-{0:0=4d}.pt'.format(index)
+        torch.save(denorm(fake_images), os.path.join(sample_dir, fake_ptname))
 
 # We train the generator by trying to get the discriminator to predict 1
 # on the fake images
@@ -86,28 +91,41 @@ if __name__ == "__main__":
     parser.add_argument('--dataset', type=str, default="MNIST")
     parser.add_argument('--train_size', type=int, default=60000)
     parser.add_argument('--num_generate', type=int, default=10000)
+    parser.add_argument('--channels', type=int, default=1)
+    parser.add_argument('--seed', type=int, default=-1)
 
     args = parser.parse_args()
-    
-    if args.dataset != "MNIST":
-        print("Error: unsupported dataset")
-        exit
 
-    mnist = MNIST(root='./data', 
-              train=True, 
-              download=True,
-              transform=Compose([ToTensor(), Normalize(mean=(0.5,), std=(0.5,))]))
+    if args.seed != -1:
+        torch.manual_seed(args.seed)
+        random.seed(args.seed)
     
-    print(len(mnist)) # should be 60,000
-    
-    mnist_train = torch.utils.data.Subset(mnist, list(range(0, args.train_size)))
-    dataloader = DataLoader(mnist_train, batch_size=args.batch_size, num_workers=16, shuffle=True)
-    
+    if args.dataset == "MNIST":
+        mnist = MNIST(root='./data', 
+                train=True, 
+                download=True,
+                transform=Compose([ToTensor(), Normalize(mean=(0.5,), std=(0.5,))]))
+        
+        print(len(mnist)) # should be 60,000
+        
+        mnist_train = torch.utils.data.Subset(mnist, list(range(0, args.train_size)))
+        dataloader = DataLoader(mnist_train, batch_size=args.batch_size, num_workers=16, shuffle=True)
+    elif args.dataset == "COVIDx":
+        COVID_dataset = COVIDxDataModule(batch_size=args.batch_size, mode="base", k=0)
+        indices = list(range(0, len(COVID_dataset.train_set)))
+        np.random.shuffle(indices)
+        COVID_train = torch.utils.data.Subset(
+            COVID_dataset.train_set, indices[:args.train_size])
+        dataloader = DataLoader(COVID_train, batch_size=args.batch_size, num_workers=16, shuffle=True)
+    else:
+        exit
+        
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # device = 'cpu'
 
     # define simple generator/discriminator models
     D = nn.Sequential(
-        nn.Linear(args.image_size * args.image_size, args.hidden_size),
+        nn.Linear(args.channels * args.image_size * args.image_size, args.hidden_size),
         nn.LeakyReLU(0.2),
         nn.Linear(args.hidden_size, args.hidden_size),
         nn.LeakyReLU(0.2),
@@ -118,7 +136,7 @@ if __name__ == "__main__":
         nn.ReLU(),
         nn.Linear(args.hidden_size, args.hidden_size),
         nn.ReLU(),
-        nn.Linear(args.hidden_size, args.image_size * args.image_size),
+        nn.Linear(args.hidden_size, args.channels * args.image_size * args.image_size),
         nn.Tanh())
     
     D.to(device)
@@ -129,24 +147,24 @@ if __name__ == "__main__":
     g_optimizer = torch.optim.Adam(G.parameters(), lr=0.0002)
 
     # TODO: add to the saves_new/args.expt folder
-    sample_dir = f'saves_new/{args.expt}/{args.dataset}/cal_gan/samples'
+    sample_dir = f'saves_new/{args.expt}/{args.dataset}/cal/samples'
     if not os.path.exists(sample_dir):
         os.makedirs(sample_dir)
 
-    ckpt_dir = f'saves_new/{args.expt}/{args.dataset}/cal_gan/checkpoints'
+    ckpt_dir = f'saves_new/{args.expt}/{args.dataset}/cal/checkpoints'
     if not os.path.exists(ckpt_dir):
         os.makedirs(ckpt_dir)
 
     # Save some real images
     for images, _ in dataloader:
-        images = images.reshape(images.size(0), 1, args.image_size, args.image_size)
+        images = images.reshape(images.size(0), args.channels, args.image_size, args.image_size)
         save_image(denorm(images), os.path.join(sample_dir, 'real_images.png'), nrow=10)
         break
     
     sample_vectors = torch.randn(args.num_generate, args.latent_size).to(device)
         
     # Before training
-    save_fake_images(0, sample_vectors)
+    save_fake_images(0, sample_vectors, args.epoch)
 
     total_step = len(dataloader)
     d_losses, g_losses, real_scores, fake_scores = [], [], [], []
@@ -170,14 +188,14 @@ if __name__ == "__main__":
                     .format(epoch, args.epoch, i+1, total_step, d_loss.item(), g_loss.item(), 
                             real_score.mean().item(), fake_score.mean().item()))
             
-        if (epoch + 1) % 5 == 0:
+        if (epoch + 1) % 50 == 0:
             # Sample and save images
-            save_fake_images(epoch+1, sample_vectors)
+            save_fake_images(epoch+1, sample_vectors, args.epoch)
         
         if epoch % 50 == 0:
             torch.save(G.state_dict(), f'{ckpt_dir}/G_epoch_{epoch}.ckpt')
             torch.save(D.state_dict(), f'{ckpt_dir}/D_epoch_{epoch}.ckpt')
-            
+    
     # Save the model checkpoints 
     torch.save(G.state_dict(), f'{ckpt_dir}/G.ckpt')
     torch.save(D.state_dict(), f'{ckpt_dir}/.ckpt')

@@ -11,6 +11,7 @@ from arch import MLP, LocationModel
 from data_utils import COVIDxDataModule, MNISTDataModule, LocationDataModule, MNISTLeNetModule
 from MIA.mia_threshold import mia
 from trainer import append_dropout
+import random
 
 def t_or_f(arg):
     ua = str(arg).upper()
@@ -53,8 +54,14 @@ parser.add_argument('--memguard', type=bool, default=False)
 parser.add_argument('--def_epoch', type=int, default=400)
 parser.add_argument('--randomize_memguard', type=t_or_f, default=True)
 parser.add_argument('--lenet', type=t_or_f, default=False)
+parser.add_argument('--small', type=t_or_f, default=False)
+parser.add_argument('--seed', type=int, default=-1)
 
 args = parser.parse_args()
+
+if args.seed != -1:
+    torch.manual_seed(args.seed)
+    random.seed(args.seed)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -99,12 +106,16 @@ if args.audit == 'EMA':
 
 # initialize
 if args.dataset == 'MNIST':
-    if not args.lenet:
-        model_train = MLP.MLP(28, args.dim, 10, args.dropout).to(device)
-        model_cal = MLP.MLP(28, args.dim, 10, args.dropout).to(device)
-    else:
+    if args.small:
+        model_train = MLP.SmallMLP(28, args.dim, 10, args.dropout).to(device)
+        model_cal = MLP.SmallMLP(28, args.dim, 10, args.dropout).to(device)
+    elif args.lenet:
         model_train = MLP.LeNet5(10, args.dropout).to(device)
         model_cal = MLP.LeNet5(10, args.dropout).to(device)
+    else: 
+        model_train = MLP.MLP(28, args.dim, 10, args.dropout).to(device)
+        model_cal = MLP.MLP(28, args.dim, 10, args.dropout).to(device)
+
 elif args.dataset == 'COVIDx':
     model_train = models.resnet18(pretrained=False, num_classes=2).to(device)
     model_cal = models.resnet18(pretrained=False, num_classes=2).to(device)
